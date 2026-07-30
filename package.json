@@ -1,0 +1,13 @@
+{
+  "name": "xhs-vercel-downloader",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "部署在 Vercel 的小红书无水印原图下载网站",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

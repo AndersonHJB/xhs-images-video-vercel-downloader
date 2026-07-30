@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="粘贴小红书分享文案，解析并下载无水印原图。" />
+    <meta name="theme-color" content="#ff3158" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/style.css" />
+    <title>小红书无水印原图下载</title>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <a class="brand" href="/" aria-label="返回首页">
+          <span class="brand-mark">图</span>
+          <span>原图下载</span>
+        </a>
+
+        <div class="hero-copy">
+          <span class="eyebrow">XIAOHONGSHU IMAGE DOWNLOADER</span>
+          <h1>粘贴分享文案，<br /><em>下载无水印原图</em></h1>
+          <p>无需安装 App。解析完成后可单张下载、勾选下载，或在浏览器本地打包 ZIP。</p>
+        </div>
+
+        <form id="parse-form" class="parse-card">
+          <label for="share-text">小红书分享文案或链接</label>
+          <textarea
+            id="share-text"
+            name="shareText"
+            rows="5"
+            maxlength="3000"
+            placeholder="例如：复制这条小红书笔记的完整分享文案并粘贴到这里……"
+            required
+          ></textarea>
+          <div class="form-actions">
+            <button id="paste-button" class="button button-secondary" type="button">粘贴</button>
+            <button id="parse-button" class="button button-primary" type="submit">
+              <span class="button-text">解析原图</span>
+              <span class="button-loader" aria-hidden="true"></span>
+            </button>
+          </div>
+          <p class="form-hint">仅处理公开可访问的图文笔记。请尊重作者版权与平台规则。</p>
+        </form>
+      </header>
+
+      <main>
+        <section id="empty-state" class="empty-state">
+          <div class="empty-icon">↘</div>
+          <h2>解析结果会显示在这里</h2>
+          <p>支持小红书短链接、完整链接，以及带文字的整段分享内容。</p>
+        </section>
+
+        <section id="result-section" class="result-section" hidden>
+          <div class="result-heading">
+            <div>
+              <span class="section-label">解析成功</span>
+              <h2 id="note-title">小红书图片</h2>
+              <p id="result-meta">已找到 0 张无水印原图</p>
+            </div>
+
+            <div class="result-actions">
+              <button id="select-all-button" class="button button-secondary" type="button">取消全选</button>
+              <button id="copy-links-button" class="button button-secondary" type="button">复制链接</button>
+              <button id="download-zip-button" class="button button-dark" type="button">下载所选 ZIP</button>
+            </div>
+          </div>
+
+          <div id="progress-panel" class="progress-panel" hidden>
+            <div class="progress-copy">
+              <strong id="progress-title">正在下载</strong>
+              <span id="progress-text">0 / 0</span>
+            </div>
+            <div class="progress-track"><span id="progress-bar"></span></div>
+          </div>
+
+          <div id="image-grid" class="image-grid"></div>
+        </section>
+      </main>
+
+      <footer>
+        <p>图片 ZIP 在你的浏览器中生成，不会上传到本站存储。</p>
+      </footer>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
