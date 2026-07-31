@@ -1,6 +1,7 @@
 const state = {
   title: "小红书图片",
   images: [],
+  videos: [],
   selected: new Set(),
   busy: false,
   engine: localStorage.getItem("xhs-engine") === "python" ? "python" : "node",
@@ -16,7 +17,15 @@ const elements = {
   resultSection: document.querySelector("#result-section"),
   noteTitle: document.querySelector("#note-title"),
   resultMeta: document.querySelector("#result-meta"),
+  imageActions: document.querySelector("#image-actions"),
+  imageSection: document.querySelector("#image-section"),
   imageGrid: document.querySelector("#image-grid"),
+  videoSection: document.querySelector("#video-section"),
+  videoPlayer: document.querySelector("#video-player"),
+  videoQuality: document.querySelector("#video-quality"),
+  videoMeta: document.querySelector("#video-meta"),
+  downloadVideoButton: document.querySelector("#download-video-button"),
+  openVideoLink: document.querySelector("#open-video-link"),
   selectAllButton: document.querySelector("#select-all-button"),
   copyLinksButton: document.querySelector("#copy-links-button"),
   downloadZipButton: document.querySelector("#download-zip-button"),
@@ -72,15 +81,18 @@ function updateEngineUI() {
   }
 
   elements.engineHint.textContent = state.engine === "python"
-    ? "当前使用 Python 完成页面抓取、解析和图片代理下载。"
-    : "当前使用 Node.js 完成页面抓取、解析和图片代理下载。";
+    ? "当前使用 Python 完成页面抓取、图片代理和视频分段下载。"
+    : "当前使用 Node.js 完成页面抓取、图片代理和视频分段下载。";
 }
 
 function updateResultMeta() {
-  if (!state.images.length) return;
+  if (!state.images.length && !state.videos.length) return;
   const strategy = state.strategy ? ` · ${state.strategy}` : "";
+  const parts = [];
+  if (state.images.length) parts.push(`${state.images.length} 张无水印原图`);
+  if (state.videos.length) parts.push(`${state.videos.length} 个视频清晰度`);
   elements.resultMeta.textContent =
-    `已找到 ${state.images.length} 张无水印原图 · ${engineLabel()} 引擎${strategy}`;
+    `已找到 ${parts.join("、")} · ${engineLabel()} 引擎${strategy}`;
 }
 
 function proxyUrl(image) {
@@ -163,6 +175,200 @@ async function downloadSingle(image) {
   }
 }
 
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "大小未知";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = bytes;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size >= 100 || unit === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unit]}`;
+}
+
+function currentVideo() {
+  if (!state.videos.length) return null;
+  const selected = Number(elements.videoQuality.value || 1);
+  return state.videos.find((video) => video.index === selected) || state.videos[0];
+}
+
+function videoFilename() {
+  return `${sanitizeFilename(state.title || "小红书视频")}.mp4`;
+}
+
+function videoApiUrl(action, sourceUrl, extra = {}) {
+  const endpoint = state.engine === "python" ? "/api/python_video" : "/api/video";
+  const params = new URLSearchParams({ action, url: sourceUrl, ...extra });
+  return `${endpoint}?${params.toString()}`;
+}
+
+function updateVideoSelection() {
+  const video = currentVideo();
+  if (!video) return;
+
+  elements.videoPlayer.src = video.url;
+  elements.videoPlayer.poster = state.images[0]?.url || "";
+  elements.openVideoLink.href = video.url;
+  const resolution = video.width && video.height ? `${video.width}×${video.height}` : "原始清晰度";
+  const codec = String(video.codec || "video").toUpperCase();
+  elements.videoMeta.textContent = `${resolution} · ${codec} · ${formatBytes(video.size)}`;
+  elements.videoPlayer.load();
+}
+
+function renderVideo() {
+  const hasVideo = state.videos.length > 0;
+  elements.videoSection.hidden = !hasVideo;
+  if (!hasVideo) {
+    elements.videoPlayer.removeAttribute("src");
+    elements.videoPlayer.load();
+    elements.videoQuality.replaceChildren();
+    return;
+  }
+
+  elements.videoQuality.replaceChildren();
+  for (const video of state.videos) {
+    const option = document.createElement("option");
+    option.value = String(video.index);
+    option.textContent = video.label || `视频线路 ${video.index}`;
+    option.selected = Boolean(video.isDefault);
+    elements.videoQuality.append(option);
+  }
+  updateVideoSelection();
+}
+
+async function readVideoApiError(response) {
+  try {
+    const body = await response.json();
+    return body.message || `视频请求失败：HTTP ${response.status}`;
+  } catch {
+    return `视频请求失败：HTTP ${response.status}`;
+  }
+}
+
+async function getVideoMeta(sourceUrl, fallbackSize = 0) {
+  const response = await fetch(videoApiUrl("meta", sourceUrl));
+  if (!response.ok) throw new Error(await readVideoApiError(response));
+  const meta = await response.json();
+  const size = Number(meta.size || fallbackSize || 0);
+  if (!size) throw new Error("无法确定视频大小，不能安全执行分段下载。");
+  return {
+    size,
+    contentType: meta.contentType || "video/mp4",
+    chunkSize: Math.min(Number(meta.chunkSize || 3_500_000), 3_500_000)
+  };
+}
+
+async function downloadVideoByChunks(sourceUrl, video) {
+  const meta = await getVideoMeta(sourceUrl, video.size);
+  const chunks = [];
+  const totalChunks = Math.ceil(meta.size / meta.chunkSize);
+
+  for (let index = 0; index < totalChunks; index += 1) {
+    const start = index * meta.chunkSize;
+    const end = Math.min(meta.size - 1, start + meta.chunkSize - 1);
+    setProgress(
+      index,
+      totalChunks,
+      `正在分段下载视频 ${formatBytes(start)} / ${formatBytes(meta.size)}`
+    );
+
+    const response = await fetch(
+      videoApiUrl("chunk", sourceUrl, {
+        start: String(start),
+        end: String(end)
+      })
+    );
+    if (!response.ok) throw new Error(await readVideoApiError(response));
+
+    const buffer = await response.arrayBuffer();
+    const expected = end - start + 1;
+    if (buffer.byteLength !== expected && end !== meta.size - 1) {
+      throw new Error(`视频第 ${index + 1} 段长度异常。`);
+    }
+    chunks.push(new Uint8Array(buffer));
+    setProgress(
+      index + 1,
+      totalChunks,
+      `正在分段下载视频 ${formatBytes(Math.min(meta.size, end + 1))} / ${formatBytes(meta.size)}`
+    );
+  }
+
+  return new Blob(chunks, { type: meta.contentType || "video/mp4" });
+}
+
+async function tryDirectVideoDownload(sourceUrl) {
+  const response = await fetch(sourceUrl, {
+    mode: "cors",
+    referrerPolicy: "no-referrer"
+  });
+  if (!response.ok) throw new Error(`视频 CDN 返回 HTTP ${response.status}`);
+  return response.blob();
+}
+
+async function downloadCurrentVideo() {
+  if (state.busy) return;
+  const video = currentVideo();
+  if (!video) {
+    showToast("当前笔记没有可下载的视频。", "error");
+    return;
+  }
+
+  state.busy = true;
+  elements.downloadVideoButton.disabled = true;
+  elements.parseButton.disabled = true;
+  elements.videoQuality.disabled = true;
+  elements.selectAllButton.disabled = true;
+  elements.copyLinksButton.disabled = true;
+  elements.downloadZipButton.disabled = true;
+  for (const input of elements.engineInputs) input.disabled = true;
+
+  const candidates = [video.url, ...(video.backupUrls || [])].filter(Boolean);
+  let lastError = null;
+
+  try {
+    for (const sourceUrl of candidates) {
+      try {
+        const blob = await downloadVideoByChunks(sourceUrl, video);
+        triggerBlobDownload(blob, videoFilename());
+        showToast("视频已经合并完成并开始保存", "success");
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    // CDN 不支持 Range 或分段接口受限时，再尝试浏览器直连。
+    try {
+      const blob = await tryDirectVideoDownload(video.url);
+      triggerBlobDownload(blob, videoFilename());
+      showToast("视频已通过浏览器直连开始保存", "success");
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+
+    window.open(video.url, "_blank", "noopener,noreferrer");
+    throw new Error(
+      `${lastError?.message || "自动下载失败"}，已打开视频原地址，可在新页面中保存。`
+    );
+  } catch (error) {
+    showToast(error.message, "error");
+  } finally {
+    state.busy = false;
+    elements.downloadVideoButton.disabled = false;
+    elements.parseButton.disabled = false;
+    elements.videoQuality.disabled = false;
+    elements.selectAllButton.disabled = false;
+    elements.copyLinksButton.disabled = false;
+    for (const input of elements.engineInputs) input.disabled = false;
+    hideProgress();
+    updateSelectionUI();
+  }
+}
+
 function updateSelectionUI() {
   const checkboxes = elements.imageGrid.querySelectorAll(
     'input[type="checkbox"]'
@@ -184,6 +390,11 @@ function renderResults() {
   elements.resultSection.hidden = false;
   elements.noteTitle.textContent = state.title;
   updateResultMeta();
+  renderVideo();
+
+  const hasImages = state.images.length > 0;
+  elements.imageActions.hidden = !hasImages;
+  elements.imageSection.hidden = !hasImages;
   elements.imageGrid.replaceChildren();
 
   for (const image of state.images) {
@@ -460,12 +671,17 @@ elements.form.addEventListener("submit", async (event) => {
 
   try {
     const payload = await parseShareText(text, state.engine);
-    state.title = payload.title || "小红书图片";
+    state.title = payload.title || "小红书媒体";
     state.images = payload.images || [];
+    state.videos = payload.videos || [];
     state.strategy = payload.strategy || "";
     state.selected = new Set(state.images.map((image) => image.index));
     renderResults();
-    showToast(`${engineLabel()} 成功解析 ${state.images.length} 张无水印原图`, "success");
+    const summary = [
+      state.images.length ? `${state.images.length} 张无水印原图` : "",
+      state.videos.length ? `${state.videos.length} 个视频清晰度` : ""
+    ].filter(Boolean).join("、");
+    showToast(`${engineLabel()} 成功解析${summary ? `：${summary}` : ""}`, "success");
   } catch (error) {
     showToast(error.message, "error");
   } finally {
@@ -510,5 +726,8 @@ elements.copyLinksButton.addEventListener("click", async () => {
     showToast("复制失败，请检查浏览器剪贴板权限。", "error");
   }
 });
+
+elements.videoQuality.addEventListener("change", updateVideoSelection);
+elements.downloadVideoButton.addEventListener("click", downloadCurrentVideo);
 
 elements.downloadZipButton.addEventListener("click", downloadSelectedZip);

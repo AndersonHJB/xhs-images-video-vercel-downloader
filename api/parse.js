@@ -49,8 +49,11 @@ export default async function handler(req, res) {
         success: true,
         engine: "node",
         title: "小红书图片",
+        type: "image",
         count: 1,
-        images: [{ index: 1, token, url: buildNoWatermarkUrl(token) }]
+        videoCount: 0,
+        images: [{ index: 1, token, url: buildNoWatermarkUrl(token) }],
+        videos: []
       });
     }
 
@@ -63,12 +66,31 @@ export default async function handler(req, res) {
 
     const parsed = parseNoteHtml(html, { noteId });
 
-    if (parsed.images.length === 0) {
+    if (parsed.images.length === 0 && parsed.videos.length === 0) {
       throw new XhsError(
-        "没有解析到图片。笔记可能已删除、需要登录，或者小红书页面结构已更新。",
+        "没有解析到图片或视频。笔记可能已删除、需要登录，或者小红书页面结构已更新。",
         422
       );
     }
+
+    const images = parsed.images.map((image, index) => ({
+      index: index + 1,
+      token: image.token,
+      url: image.url
+    }));
+    const videos = parsed.videos.map((video, index) => ({
+      index: index + 1,
+      url: video.url,
+      backupUrls: Array.isArray(video.backupUrls) ? video.backupUrls : [],
+      codec: video.codec,
+      width: video.width,
+      height: video.height,
+      bitrate: video.bitrate,
+      size: video.size,
+      qualityType: video.qualityType,
+      label: video.label,
+      isDefault: Boolean(video.isDefault)
+    }));
 
     return res.status(200).json({
       success: true,
@@ -76,12 +98,11 @@ export default async function handler(req, res) {
       title: parsed.title,
       noteId,
       strategy: parsed.strategy,
-      count: parsed.images.length,
-      images: parsed.images.map((image, index) => ({
-        index: index + 1,
-        token: image.token,
-        url: image.url
-      }))
+      type: videos.length > 0 ? (images.length > 0 ? "mixed" : "video") : "image",
+      count: images.length,
+      videoCount: videos.length,
+      images,
+      videos
     });
   } catch (error) {
     const statusCode = error instanceof XhsError ? error.statusCode : 500;

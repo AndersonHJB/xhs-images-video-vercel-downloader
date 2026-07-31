@@ -1,4 +1,4 @@
-"""Vercel Python Function：抓取并解析当前小红书图文笔记。
+"""Vercel Python Function：抓取并解析当前小红书图片/视频笔记。
 
 仅使用 Python 标准库，避免额外依赖和更大的冷启动体积。
 """
@@ -63,6 +63,13 @@ DIRECT_IMAGE_HOSTS = {
 }
 IMAGE_LIST_KEYS = ("imageList", "image_list", "images")
 NOTE_WRAPPER_KEYS = ("note", "noteData", "note_data", "data")
+VIDEO_STREAM_KEYS = ("h264", "h265", "av1")
+VIDEO_META_KEYS = {
+    "og:video",
+    "og:video:url",
+    "og:video:secure_url",
+    "twitter:player:stream",
+}
 MAX_HTML_BYTES = 6 * 1024 * 1024
 MAX_INPUT_LENGTH = 3000
 
@@ -108,6 +115,21 @@ def is_xhs_image_url(value: Any) -> bool:
 def is_direct_image_url(value: str) -> bool:
     parsed = urlparse(normalize_image_url(value))
     return parsed.netloc.lower() in DIRECT_IMAGE_HOSTS
+
+
+def is_xhs_video_url(value: Any) -> bool:
+    try:
+        parsed = urlparse(normalize_image_url(value))
+    except ValueError:
+        return False
+    host = parsed.netloc.lower()
+    return bool(
+        parsed.scheme == "https"
+        and not parsed.username
+        and not parsed.password
+        and (host == "xhscdn.com" or host.endswith(".xhscdn.com"))
+        and len(parsed.path) > 1
+    )
 
 
 def is_allowed_page_host(hostname: str) -> bool:
@@ -258,6 +280,174 @@ def choose_one_url_per_image(image_list: Any) -> list[str]:
         if candidates:
             selected.append(max(candidates, key=image_quality_score))
     return unique_keep_order(selected)
+
+
+
+def normalize_number(value: Any) -> int:
+    try:
+        number = int(float(value or 0))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return number if number > 0 else 0
+
+
+def collect_video_urls_from_stream(stream: Any) -> list[str]:
+    if not isinstance(stream, dict):
+        return []
+
+    values: list[Any] = [
+        stream.get("masterUrl"),
+        stream.get("master_url"),
+        stream.get("url"),
+    ]
+    for key in ("masterUrls", "master_urls", "backupUrls", "backup_urls"):
+        item = stream.get(key)
+        if isinstance(item, list):
+            values.extend(item)
+
+    seen: set[str] = set()
+    urls: list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        normalized = normalize_image_url(value).split("#", 1)[0]
+        if not is_xhs_video_url(normalized) or normalized in seen:
+            continue
+        seen.add(normalized)
+        urls.append(normalized)
+    return urls
+
+
+def codec_priority(codec: Any) -> int:
+    normalized = str(codec or "").lower()
+    if "264" in normalized or normalized == "avc":
+        return 3
+    if "265" in normalized or "hevc" in normalized:
+        return 2
+    if "av1" in normalized:
+        return 1
+    return 0
+
+
+def video_quality_score(video: dict[str, Any]) -> int:
+    return (
+        codec_priority(video.get("codec")) * 10**15
+        + normalize_number(video.get("width"))
+        * normalize_number(video.get("height"))
+        * 10**6
+        + normalize_number(video.get("bitrate")) * 10
+        + normalize_number(video.get("size"))
+    )
+
+
+def extract_video_streams_from_note(note: Any) -> list[dict[str, Any]]:
+    """只从当前笔记对象读取视频流，不扫描相关推荐。"""
+    if not isinstance(note, dict):
+        return []
+
+    streams: list[dict[str, Any]] = []
+    video = note.get("video")
+    media = video.get("media") if isinstance(video, dict) else None
+    stream_root = media.get("stream") if isinstance(media, dict) else None
+
+    if isinstance(stream_root, dict):
+        for stream_key in VIDEO_STREAM_KEYS:
+            stream_list = stream_root.get(stream_key)
+            if not isinstance(stream_list, list):
+                continue
+            for item in stream_list:
+                if not isinstance(item, dict):
+                    continue
+                urls = collect_video_urls_from_stream(item)
+                if not urls:
+                    continue
+                codec = (
+                    item.get("videoCodec")
+                    or item.get("video_codec")
+                    or item.get("codec")
+                    or stream_key
+                )
+                streams.append(
+                    {
+                        "url": urls[0],
+                        "backupUrls": urls[1:],
+                        "codec": str(codec).lower(),
+                        "width": normalize_number(item.get("width")),
+                        "height": normalize_number(item.get("height")),
+                        "bitrate": normalize_number(
+                            item.get("videoBitrate")
+                            or item.get("video_bitrate")
+                            or item.get("bitrate")
+                        ),
+                        "size": normalize_number(
+                            item.get("size")
+                            or item.get("fileSize")
+                            or item.get("file_size")
+                        ),
+                        "qualityType": str(
+                            item.get("qualityType")
+                            or item.get("quality_type")
+                            or ""
+                        ),
+                        "source": "media-stream",
+                    }
+                )
+
+    if not streams and isinstance(video, dict):
+        consumer = video.get("consumer")
+        key = None
+        if isinstance(consumer, dict):
+            key = consumer.get("originVideoKey") or consumer.get("origin_video_key")
+        key = key or video.get("originVideoKey") or video.get("origin_video_key")
+        if isinstance(key, str) and key.strip():
+            clean_key = key.strip().lstrip("/")
+            url = normalize_image_url(
+                f"https://sns-video-bd.xhscdn.com/{clean_key}"
+            )
+            if is_xhs_video_url(url):
+                streams.append(
+                    {
+                        "url": url,
+                        "backupUrls": [],
+                        "codec": "h264",
+                        "width": 0,
+                        "height": 0,
+                        "bitrate": 0,
+                        "size": 0,
+                        "qualityType": "origin",
+                        "source": "origin-video-key",
+                    }
+                )
+
+    deduped: dict[str, dict[str, Any]] = {}
+    for stream in streams:
+        url = str(stream.get("url") or "")
+        existing = deduped.get(url)
+        if existing is None or video_quality_score(stream) > video_quality_score(existing):
+            deduped[url] = stream
+
+    return sorted(deduped.values(), key=video_quality_score, reverse=True)
+
+
+def format_video_label(video: dict[str, Any], index: int) -> str:
+    width = normalize_number(video.get("width"))
+    height = normalize_number(video.get("height"))
+    resolution = f"{width}×{height}" if width and height else "原始清晰度"
+    codec = str(video.get("codec") or "video").upper()
+    bitrate = normalize_number(video.get("bitrate"))
+    bitrate_text = f" · {round(bitrate / 1000)} kbps" if bitrate else ""
+    return f"{resolution} · {codec}{bitrate_text} · 线路 {index + 1}"
+
+
+def prepare_video_results(videos: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    sorted_videos = sorted(videos, key=video_quality_score, reverse=True)[:12]
+    results: list[dict[str, Any]] = []
+    for index, video in enumerate(sorted_videos):
+        item = dict(video)
+        item["label"] = format_video_label(item, index)
+        item["isDefault"] = index == 0
+        results.append(item)
+    return results
 
 
 def extract_balanced_structure(
@@ -482,14 +672,14 @@ def select_exact_note_from_states(
     for state in extract_initial_states(page_html):
         for candidate in find_exact_note_candidates(state, note_id):
             image_list = direct_image_list(candidate)
-            if image_list is None:
-                continue
-            urls = choose_one_url_per_image(image_list)
-            if not urls:
+            urls = choose_one_url_per_image(image_list) if image_list is not None else []
+            videos = extract_video_streams_from_note(candidate)
+            if not urls and not videos:
                 continue
             matches.append(
                 {
                     "urls": urls,
+                    "videos": videos,
                     "title": extract_title_from_note_object(candidate),
                     "exact_id": object_has_target_id(candidate, note_id),
                 }
@@ -497,7 +687,11 @@ def select_exact_note_from_states(
     if not matches:
         return None
     matches.sort(
-        key=lambda item: (int(bool(item["exact_id"])), len(item["urls"])),
+        key=lambda item: (
+            int(bool(item["exact_id"])),
+            len(item["urls"]) + len(item["videos"]),
+            len(item["urls"]),
+        ),
         reverse=True,
     )
     return matches[0]
@@ -552,6 +746,75 @@ def extract_target_local_image_list(
         return None
     candidates.sort(key=lambda item: (item["distance"], -len(item["urls"])))
     return {"urls": candidates[0]["urls"], "title": ""}
+
+
+
+def find_video_objects_with_positions(text: str) -> list[dict[str, Any]]:
+    objects: list[dict[str, Any]] = []
+    pattern = re.compile(r'["\']video["\']\s*:\s*\{')
+    for match in pattern.finditer(text):
+        start = text.find("{", match.start())
+        if start < 0:
+            continue
+        balanced = extract_balanced_structure(text, start, "{", "}")
+        if balanced:
+            object_text, end = balanced
+            objects.append({"start": start, "end": end, "text": object_text})
+    return objects
+
+
+def extract_target_local_video_streams(
+    page_html: str, note_id: str
+) -> list[dict[str, Any]]:
+    note_indexes = all_indexes_of(page_html, note_id)
+    if not note_indexes:
+        return []
+
+    candidates: list[dict[str, Any]] = []
+    for item in find_video_objects_with_positions(page_html):
+        distance = min(abs(item["start"] - index) for index in note_indexes)
+        if distance > 60000:
+            continue
+        parsed = parse_json_like(item["text"])
+        if not isinstance(parsed, dict):
+            continue
+        videos = extract_video_streams_from_note({"video": parsed})
+        if videos:
+            candidates.append({"distance": distance, "videos": videos})
+
+    if not candidates:
+        return []
+    candidates.sort(key=lambda item: (item["distance"], -len(item["videos"])))
+    return candidates[0]["videos"]
+
+
+def extract_primary_meta_video(page_html: str) -> dict[str, Any] | None:
+    meta_pattern = re.compile(r"<meta\b[^>]*>", re.I)
+    content_pattern = re.compile(r"\bcontent\s*=\s*([\"'])(.*?)\1", re.I)
+    key_pattern = re.compile(r"\b(?:property|name)\s*=\s*([\"'])(.*?)\1", re.I)
+
+    for tag_match in meta_pattern.finditer(page_html):
+        tag = tag_match.group(0)
+        content_match = content_pattern.search(tag)
+        key_match = key_pattern.search(tag)
+        content = content_match.group(2) if content_match else ""
+        key = key_match.group(2).lower() if key_match else ""
+        if key not in VIDEO_META_KEYS:
+            continue
+        normalized = normalize_image_url(content)
+        if is_xhs_video_url(normalized):
+            return {
+                "url": normalized,
+                "backupUrls": [],
+                "codec": "h264",
+                "width": 0,
+                "height": 0,
+                "bitrate": 0,
+                "size": 0,
+                "qualityType": "meta",
+                "source": "primary-meta",
+            }
+    return None
 
 
 def extract_primary_meta_image(page_html: str) -> str | None:
@@ -653,6 +916,7 @@ def parse_note_html(page_html: str, note_id: str) -> dict[str, Any]:
         return {
             "title": extract_page_title(page_html),
             "images": [],
+            "videos": [],
             "strategy": "missing-note-id",
         }
 
@@ -661,22 +925,45 @@ def parse_note_html(page_html: str, note_id: str) -> dict[str, Any]:
         return {
             "title": exact["title"] or extract_page_title(page_html),
             "images": convert_source_urls(exact["urls"])[:50],
+            "videos": prepare_video_results(exact["videos"]),
             "strategy": "exact-initial-state",
         }
 
-    local = extract_target_local_image_list(page_html, note_id)
-    if local:
+    local_images = extract_target_local_image_list(page_html, note_id)
+    local_videos = extract_target_local_video_streams(page_html, note_id)
+    if local_images or local_videos:
         return {
-            "title": local["title"] or extract_page_title(page_html),
-            "images": convert_source_urls(local["urls"])[:50],
-            "strategy": "note-id-local-image-list",
+            "title": (
+                local_images.get("title", "") if local_images else ""
+            ) or extract_page_title(page_html),
+            "images": convert_source_urls(
+                local_images.get("urls", []) if local_images else []
+            )[:50],
+            "videos": prepare_video_results(local_videos),
+            "strategy": (
+                "note-id-local-media"
+                if local_images and local_videos
+                else "note-id-local-image-list"
+                if local_images
+                else "note-id-local-video"
+            ),
         }
 
-    primary = extract_primary_meta_image(page_html)
+    primary_image = extract_primary_meta_image(page_html)
+    primary_video = extract_primary_meta_video(page_html)
     return {
         "title": extract_page_title(page_html),
-        "images": convert_source_urls([primary]) if primary else [],
-        "strategy": "primary-meta-cover" if primary else "not-found",
+        "images": convert_source_urls([primary_image]) if primary_image else [],
+        "videos": prepare_video_results([primary_video]) if primary_video else [],
+        "strategy": (
+            "primary-meta-media"
+            if primary_image and primary_video
+            else "primary-meta-cover"
+            if primary_image
+            else "primary-meta-video"
+            if primary_video
+            else "not-found"
+        ),
     }
 
 
@@ -795,7 +1082,9 @@ class handler(BaseHTTPRequestHandler):
                         "success": True,
                         "engine": "python",
                         "title": "小红书图片",
+                        "type": "image",
                         "count": 1,
+                        "videoCount": 0,
                         "images": [
                             {
                                 "index": 1,
@@ -803,6 +1092,7 @@ class handler(BaseHTTPRequestHandler):
                                 "url": build_no_watermark_url(token),
                             }
                         ],
+                        "videos": [],
                     },
                 )
                 return
@@ -813,9 +1103,9 @@ class handler(BaseHTTPRequestHandler):
                 raise XhsError("无法从分享链接中识别当前笔记 ID。", 422)
 
             parsed = parse_note_html(page_html, note_id)
-            if not parsed["images"]:
+            if not parsed["images"] and not parsed["videos"]:
                 raise XhsError(
-                    "没有解析到图片。笔记可能已删除、需要登录，或者小红书页面结构已更新。",
+                    "没有解析到图片或视频。笔记可能已删除、需要登录，或者小红书页面结构已更新。",
                     422,
                 )
 
@@ -827,6 +1117,22 @@ class handler(BaseHTTPRequestHandler):
                 }
                 for index, image in enumerate(parsed["images"], start=1)
             ]
+            videos = [
+                {
+                    "index": index,
+                    "url": video["url"],
+                    "backupUrls": video.get("backupUrls", []),
+                    "codec": video.get("codec", ""),
+                    "width": video.get("width", 0),
+                    "height": video.get("height", 0),
+                    "bitrate": video.get("bitrate", 0),
+                    "size": video.get("size", 0),
+                    "qualityType": video.get("qualityType", ""),
+                    "label": video.get("label", ""),
+                    "isDefault": bool(video.get("isDefault")),
+                }
+                for index, video in enumerate(parsed["videos"], start=1)
+            ]
             self._send_json(
                 200,
                 {
@@ -835,8 +1141,13 @@ class handler(BaseHTTPRequestHandler):
                     "title": parsed["title"],
                     "noteId": note_id,
                     "strategy": parsed["strategy"],
+                    "type": (
+                        "mixed" if images and videos else "video" if videos else "image"
+                    ),
                     "count": len(images),
+                    "videoCount": len(videos),
                     "images": images,
+                    "videos": videos,
                 },
             )
         except XhsError as error:

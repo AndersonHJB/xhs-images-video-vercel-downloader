@@ -15,6 +15,13 @@
     "api/python_image.py": {
       "maxDuration": 20,
       "excludeFiles": "{test/**,README.md,*.zip}"
+    },
+    "api/video.js": {
+      "maxDuration": 20
+    },
+    "api/python_video.py": {
+      "maxDuration": 20,
+      "excludeFiles": "{test/**,README.md,*.zip}"
     }
   },
   "headers": [

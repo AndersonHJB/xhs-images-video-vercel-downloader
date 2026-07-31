@@ -97,3 +97,112 @@ test("初始状态不可解析时，只取距离当前 noteId 最近的 imageLis
   assert.equal(parsed.images.length, 4);
   assert.ok(parsed.images.every((image) => image.token.startsWith("local")));
 });
+
+function videoUrl(id) {
+  return `https://sns-video-bd.xhscdn.com/stream/${id}.mp4`;
+}
+
+function makeVideo(codec, id, width, height, bitrate, size) {
+  return {
+    masterUrl: videoUrl(id),
+    backupUrls: [videoUrl(`${id}-backup`)],
+    videoCodec: codec,
+    width,
+    height,
+    videoBitrate: bitrate,
+    size,
+    qualityType: "HD"
+  };
+}
+
+test("只解析当前 noteId 的视频流，不混入推荐帖子视频", () => {
+  const targetId = "6a68c6d3000000001303f099";
+  const otherId = "bbbbbbbbbbbbbbbbbbbbbbbb";
+  const state = {
+    note: {
+      noteDetailMap: {
+        [targetId]: {
+          note: {
+            noteId: targetId,
+            type: "video",
+            title: "目标视频",
+            imageList: makeImageList("video-cover", 1),
+            video: {
+              media: {
+                stream: {
+                  h264: [
+                    makeVideo("h264", "target-1080", 1920, 1080, 5000000, 18000000),
+                    makeVideo("h264", "target-720", 1280, 720, 2500000, 9000000)
+                  ],
+                  h265: [
+                    makeVideo("h265", "target-hevc", 2560, 1440, 6000000, 20000000)
+                  ]
+                }
+              }
+            }
+          }
+        },
+        [otherId]: {
+          note: {
+            noteId: otherId,
+            type: "video",
+            title: "推荐视频",
+            video: {
+              media: {
+                stream: {
+                  h264: [makeVideo("h264", "other-video", 3840, 2160, 9000000, 40000000)]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+
+  const html = `<script>window.__INITIAL_STATE__=${JSON.stringify(state)}</script>`;
+  const parsed = parseNoteHtml(html, { noteId: targetId });
+
+  assert.equal(parsed.strategy, "exact-initial-state");
+  assert.equal(parsed.title, "目标视频");
+  assert.equal(parsed.images.length, 1);
+  assert.equal(parsed.videos.length, 3);
+  assert.ok(parsed.videos.every((video) => video.url.includes("target-")));
+  assert.ok(parsed.videos.every((video) => !video.url.includes("other-video")));
+  assert.equal(parsed.videos[0].codec, "h264");
+  assert.equal(parsed.videos[0].width, 1920);
+  assert.equal(parsed.videos[0].backupUrls.length, 1);
+});
+
+test("纯视频笔记即使没有 imageList 也可以解析", () => {
+  const targetId = "cccccccccccccccccccccccc";
+  const state = {
+    note: {
+      noteDetailMap: {
+        [targetId]: {
+          note: {
+            noteId: targetId,
+            title: "纯视频",
+            type: "video",
+            video: {
+              media: {
+                stream: {
+                  h264: [makeVideo("h264", "video-only", 1080, 1920, 3000000, 12000000)]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+
+  const parsed = parseNoteHtml(
+    `<script>window.__INITIAL_STATE__=${JSON.stringify(state)}</script>`,
+    { noteId: targetId }
+  );
+
+  assert.equal(parsed.images.length, 0);
+  assert.equal(parsed.videos.length, 1);
+  assert.match(parsed.videos[0].url, /video-only/);
+});

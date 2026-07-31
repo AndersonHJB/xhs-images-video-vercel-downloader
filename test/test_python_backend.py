@@ -142,5 +142,124 @@ class PythonBackendTests(unittest.TestCase):
         )
 
 
+    def test_only_target_note_video(self) -> None:
+        target_id = "6a68c6d3000000001303f099"
+        other_id = "bbbbbbbbbbbbbbbbbbbbbbbb"
+
+        def video_url(identifier: str) -> str:
+            return f"https://sns-video-bd.xhscdn.com/stream/{identifier}.mp4"
+
+        def stream(identifier: str, width: int, height: int) -> dict[str, object]:
+            return {
+                "masterUrl": video_url(identifier),
+                "backupUrls": [video_url(identifier + "-backup")],
+                "videoCodec": "h264",
+                "width": width,
+                "height": height,
+                "videoBitrate": 4_000_000,
+                "size": 12_000_000,
+            }
+
+        state = {
+            "note": {
+                "noteDetailMap": {
+                    target_id: {
+                        "note": {
+                            "noteId": target_id,
+                            "title": "目标视频",
+                            "type": "video",
+                            "imageList": make_image_list("video-cover", 1),
+                            "video": {
+                                "media": {
+                                    "stream": {
+                                        "h264": [
+                                            stream("target-1080", 1920, 1080),
+                                            stream("target-720", 1280, 720),
+                                        ]
+                                    }
+                                }
+                            },
+                        }
+                    },
+                    other_id: {
+                        "note": {
+                            "noteId": other_id,
+                            "title": "推荐视频",
+                            "video": {
+                                "media": {
+                                    "stream": {
+                                        "h264": [stream("other-video", 3840, 2160)]
+                                    }
+                                }
+                            },
+                        }
+                    },
+                }
+            }
+        }
+        page_html = (
+            "<script>window.__INITIAL_STATE__="
+            + json.dumps(state, ensure_ascii=False, separators=(",", ":"))
+            + "</script>"
+        )
+        parsed = python_parse.parse_note_html(page_html, target_id)
+
+        self.assertEqual(parsed["strategy"], "exact-initial-state")
+        self.assertEqual(parsed["title"], "目标视频")
+        self.assertEqual(len(parsed["images"]), 1)
+        self.assertEqual(len(parsed["videos"]), 2)
+        self.assertTrue(
+            all("target-" in video["url"] for video in parsed["videos"])
+        )
+        self.assertFalse(
+            any("other-video" in video["url"] for video in parsed["videos"])
+        )
+        self.assertEqual(len(parsed["videos"][0]["backupUrls"]), 1)
+
+    def test_video_only_note_without_image_list(self) -> None:
+        target_id = "cccccccccccccccccccccccc"
+        state = {
+            "note": {
+                "noteDetailMap": {
+                    target_id: {
+                        "note": {
+                            "noteId": target_id,
+                            "title": "纯视频",
+                            "type": "video",
+                            "video": {
+                                "media": {
+                                    "stream": {
+                                        "h264": [
+                                            {
+                                                "masterUrl": (
+                                                    "https://sns-video-bd.xhscdn.com/"
+                                                    "stream/video-only.mp4"
+                                                ),
+                                                "videoCodec": "h264",
+                                                "width": 1080,
+                                                "height": 1920,
+                                                "size": 10_000_000,
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        }
+        page_html = (
+            "<script>window.__INITIAL_STATE__="
+            + json.dumps(state, separators=(",", ":"))
+            + "</script>"
+        )
+        parsed = python_parse.parse_note_html(page_html, target_id)
+        self.assertEqual(parsed["images"], [])
+        self.assertEqual(len(parsed["videos"]), 1)
+        self.assertIn("video-only", parsed["videos"][0]["url"])
+
+
+
 if __name__ == "__main__":
     unittest.main()
