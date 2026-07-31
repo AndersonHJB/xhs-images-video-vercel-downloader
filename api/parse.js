@@ -2,6 +2,7 @@ import {
   XhsError,
   buildNoWatermarkUrl,
   extractInputUrl,
+  extractNoteId,
   extractOriginalAssetToken,
   fetchNotePage,
   isDirectImageUrl,
@@ -52,8 +53,14 @@ export default async function handler(req, res) {
       });
     }
 
-    const { html } = await fetchNotePage(inputUrl);
-    const parsed = parseNoteHtml(html);
+    const { finalUrl, html } = await fetchNotePage(inputUrl);
+    const noteId = extractNoteId(finalUrl) || extractNoteId(inputUrl);
+
+    if (!noteId) {
+      throw new XhsError("无法从分享链接中识别当前笔记 ID。", 422);
+    }
+
+    const parsed = parseNoteHtml(html, { noteId });
 
     if (parsed.images.length === 0) {
       throw new XhsError(
@@ -65,6 +72,8 @@ export default async function handler(req, res) {
     return res.status(200).json({
       success: true,
       title: parsed.title,
+      noteId,
+      strategy: parsed.strategy,
       count: parsed.images.length,
       images: parsed.images.map((image, index) => ({
         index: index + 1,
