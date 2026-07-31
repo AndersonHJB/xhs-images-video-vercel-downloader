@@ -2,7 +2,9 @@ const state = {
   title: "小红书图片",
   images: [],
   selected: new Set(),
-  busy: false
+  busy: false,
+  engine: localStorage.getItem("xhs-engine") === "python" ? "python" : "node",
+  strategy: ""
 };
 
 const elements = {
@@ -22,7 +24,9 @@ const elements = {
   progressTitle: document.querySelector("#progress-title"),
   progressText: document.querySelector("#progress-text"),
   progressBar: document.querySelector("#progress-bar"),
-  toast: document.querySelector("#toast")
+  toast: document.querySelector("#toast"),
+  engineInputs: [...document.querySelectorAll('input[name="engine"]')],
+  engineHint: document.querySelector("#engine-hint")
 };
 
 function showToast(message, type = "info") {
@@ -41,6 +45,7 @@ function setParsing(isParsing) {
   elements.parseButton.disabled = isParsing;
   elements.parseButton.classList.toggle("is-loading", isParsing);
   elements.textarea.disabled = isParsing;
+  for (const input of elements.engineInputs) input.disabled = isParsing;
 }
 
 function sanitizeFilename(value) {
@@ -57,12 +62,36 @@ function imageFilename(image) {
   return `${String(image.index).padStart(2, "0")}.jpg`;
 }
 
+function engineLabel(engine = state.engine) {
+  return engine === "python" ? "Python" : "Node.js";
+}
+
+function updateEngineUI() {
+  for (const input of elements.engineInputs) {
+    input.checked = input.value === state.engine;
+  }
+
+  elements.engineHint.textContent = state.engine === "python"
+    ? "当前使用 Python 完成页面抓取、解析和图片代理下载。"
+    : "当前使用 Node.js 完成页面抓取、解析和图片代理下载。";
+}
+
+function updateResultMeta() {
+  if (!state.images.length) return;
+  const strategy = state.strategy ? ` · ${state.strategy}` : "";
+  elements.resultMeta.textContent =
+    `已找到 ${state.images.length} 张无水印原图 · ${engineLabel()} 引擎${strategy}`;
+}
+
 function proxyUrl(image) {
   const params = new URLSearchParams({
     token: image.token,
     name: imageFilename(image)
   });
-  return `/api/image?${params.toString()}`;
+  const endpoint = state.engine === "python"
+    ? "/api/python_image"
+    : "/api/image";
+  return `${endpoint}?${params.toString()}`;
 }
 
 function setProgress(current, total, title = "正在下载并打包") {
@@ -154,7 +183,7 @@ function renderResults() {
   elements.emptyState.hidden = true;
   elements.resultSection.hidden = false;
   elements.noteTitle.textContent = state.title;
-  elements.resultMeta.textContent = `已找到 ${state.images.length} 张无水印原图`;
+  updateResultMeta();
   elements.imageGrid.replaceChildren();
 
   for (const image of state.images) {
@@ -197,8 +226,12 @@ function renderResults() {
   });
 }
 
-async function parseShareText(text) {
-  const response = await fetch("/api/parse", {
+async function parseShareText(text, engine) {
+  const endpoint = engine === "python"
+    ? "/api/python_parse"
+    : "/api/parse";
+
+  const response = await fetch(endpoint, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ text })
@@ -333,6 +366,8 @@ async function downloadSelectedZip() {
   state.busy = true;
   elements.downloadZipButton.disabled = true;
   elements.selectAllButton.disabled = true;
+  elements.parseButton.disabled = true;
+  for (const input of elements.engineInputs) input.disabled = true;
   const files = [];
   const failures = [];
 
@@ -385,10 +420,25 @@ async function downloadSelectedZip() {
   } finally {
     state.busy = false;
     elements.selectAllButton.disabled = false;
+    elements.parseButton.disabled = false;
+    for (const input of elements.engineInputs) input.disabled = false;
     hideProgress();
     updateSelectionUI();
   }
 }
+
+for (const input of elements.engineInputs) {
+  input.addEventListener("change", () => {
+    if (!input.checked) return;
+    state.engine = input.value === "python" ? "python" : "node";
+    localStorage.setItem("xhs-engine", state.engine);
+    updateEngineUI();
+    updateResultMeta();
+    showToast(`已切换到 ${engineLabel()} 后台`, "success");
+  });
+}
+
+updateEngineUI();
 
 elements.form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -400,16 +450,22 @@ elements.form.addEventListener("submit", async (event) => {
     return;
   }
 
+  const selectedEngine = elements.engineInputs.find((input) => input.checked)?.value || "node";
+  state.engine = selectedEngine === "python" ? "python" : "node";
+  localStorage.setItem("xhs-engine", state.engine);
+  updateEngineUI();
+
   setParsing(true);
-  showToast("正在解析公开笔记页面……");
+  showToast(`正在使用 ${engineLabel()} 解析公开笔记页面……`);
 
   try {
-    const payload = await parseShareText(text);
+    const payload = await parseShareText(text, state.engine);
     state.title = payload.title || "小红书图片";
     state.images = payload.images || [];
+    state.strategy = payload.strategy || "";
     state.selected = new Set(state.images.map((image) => image.index));
     renderResults();
-    showToast(`成功解析 ${state.images.length} 张无水印原图`, "success");
+    showToast(`${engineLabel()} 成功解析 ${state.images.length} 张无水印原图`, "success");
   } catch (error) {
     showToast(error.message, "error");
   } finally {

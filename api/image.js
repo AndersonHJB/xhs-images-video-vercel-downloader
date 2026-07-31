@@ -39,6 +39,7 @@ async function readBufferWithLimit(response) {
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "private, max-age=300");
   res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-XHS-Engine", "node");
 
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");

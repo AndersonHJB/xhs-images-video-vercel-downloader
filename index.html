@@ -20,7 +20,7 @@
         <div class="hero-copy">
           <span class="eyebrow">XIAOHONGSHU IMAGE DOWNLOADER</span>
           <h1>粘贴分享文案，<br /><em>下载无水印原图</em></h1>
-          <p>无需安装 App。解析完成后可单张下载、勾选下载，或在浏览器本地打包 ZIP。</p>
+          <p>无需安装 App。可自行切换 Node.js 或 Python 后台，支持单张下载、勾选下载和浏览器本地打包 ZIP。</p>
         </div>
 
         <form id="parse-form" class="parse-card">
@@ -33,6 +33,30 @@
             placeholder="例如：复制这条小红书笔记的完整分享文案并粘贴到这里……"
             required
           ></textarea>
+
+          <fieldset class="engine-picker">
+            <legend>后台抓取与下载引擎</legend>
+            <div class="engine-options">
+              <label class="engine-option">
+                <input type="radio" name="engine" value="node" checked />
+                <span>
+                  <strong>Node.js</strong>
+                  <small>默认推荐，启动更快</small>
+                </span>
+              </label>
+              <label class="engine-option">
+                <input type="radio" name="engine" value="python" />
+                <span>
+                  <strong>Python</strong>
+                  <small>独立解析，故障时切换</small>
+                </span>
+              </label>
+            </div>
+            <p id="engine-hint" class="engine-hint">
+              当前使用 Node.js 完成页面抓取、解析和图片代理下载。
+            </p>
+          </fieldset>
+
           <div class="form-actions">
             <button id="paste-button" class="button button-secondary" type="button">粘贴</button>
             <button id="parse-button" class="button button-primary" type="submit">

@@ -47,6 +47,7 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         success: true,
+        engine: "node",
         title: "小红书图片",
         count: 1,
         images: [{ index: 1, token, url: buildNoWatermarkUrl(token) }]
@@ -71,6 +72,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       success: true,
+      engine: "node",
       title: parsed.title,
       noteId,
       strategy: parsed.strategy,
@@ -88,6 +90,6 @@ export default async function handler(req, res) {
       : "服务器解析失败，请稍后重试。";
 
     console.error("parse error", error);
-    return res.status(statusCode).json({ success: false, message });
+    return res.status(statusCode).json({ success: false, engine: "node", message });
   }
 }

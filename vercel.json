@@ -7,6 +7,14 @@
     },
     "api/image.js": {
       "maxDuration": 20
+    },
+    "api/python_parse.py": {
+      "maxDuration": 20,
+      "excludeFiles": "{test/**,README.md,*.zip}"
+    },
+    "api/python_image.py": {
+      "maxDuration": 20,
+      "excludeFiles": "{test/**,README.md,*.zip}"
     }
   },
   "headers": [

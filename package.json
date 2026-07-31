@@ -1,12 +1,14 @@
 {
   "name": "xhs-vercel-downloader",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
-  "description": "部署在 Vercel 的小红书无水印原图下载网站",
+  "description": "支持 Node.js/Python 双后台切换的 Vercel 小红书无水印原图下载网站",
   "scripts": {
     "dev": "vercel dev",
-    "test": "node --test"
+    "test": "npm run test:node && npm run test:python",
+    "test:node": "node --test",
+    "test:python": "python3 -m unittest discover -s test -p 'test_python_*.py'"
   },
   "engines": {
     "node": ">=22"
