@@ -1,5 +1,11 @@
+import { makeNoteTextFileData, makeZipBlob } from "./lib/archive.js";
+
 const state = {
   title: "小红书图片",
+  content: "",
+  noteId: "",
+  sourceUrl: "",
+  parseEngine: "node",
   images: [],
   videos: [],
   selected: new Set(),
@@ -7,6 +13,14 @@ const state = {
   engine: localStorage.getItem("xhs-engine") === "python" ? "python" : "node",
   strategy: ""
 };
+
+const MAX_CLIPBOARD_IMAGES = 12;
+const MAX_CLIPBOARD_SOURCE_BYTES = 30 * 1024 * 1024;
+const MAX_CLIPBOARD_PIXELS = 20_000_000;
+const MAX_CLIPBOARD_TOTAL_BYTES = 120 * 1024 * 1024;
+const CLIPBOARD_IMAGE_TIMEOUT_MS = 20_000;
+const CLIPBOARD_WRITE_TIMEOUT_MS = 30_000;
+const IMAGE_HEADER_INSPECTION_BYTES = 1024 * 1024;
 
 const elements = {
   form: document.querySelector("#parse-form"),
@@ -17,6 +31,9 @@ const elements = {
   resultSection: document.querySelector("#result-section"),
   noteTitle: document.querySelector("#note-title"),
   resultMeta: document.querySelector("#result-meta"),
+  captionSection: document.querySelector("#caption-section"),
+  noteCaption: document.querySelector("#note-caption"),
+  copyCaptionButton: document.querySelector("#copy-caption-button"),
   imageActions: document.querySelector("#image-actions"),
   imageSection: document.querySelector("#image-section"),
   imageGrid: document.querySelector("#image-grid"),
@@ -27,6 +44,7 @@ const elements = {
   downloadVideoButton: document.querySelector("#download-video-button"),
   openVideoLink: document.querySelector("#open-video-link"),
   selectAllButton: document.querySelector("#select-all-button"),
+  copySelectedImagesButton: document.querySelector("#copy-selected-images-button"),
   copyLinksButton: document.querySelector("#copy-links-button"),
   downloadZipButton: document.querySelector("#download-zip-button"),
   progressPanel: document.querySelector("#progress-panel"),
@@ -34,18 +52,32 @@ const elements = {
   progressText: document.querySelector("#progress-text"),
   progressBar: document.querySelector("#progress-bar"),
   toast: document.querySelector("#toast"),
+  alertToast: document.querySelector("#alert-toast"),
   engineInputs: [...document.querySelectorAll('input[name="engine"]')],
   engineHint: document.querySelector("#engine-hint")
 };
 
-function showToast(message, type = "info") {
-  elements.toast.textContent = message;
-  elements.toast.dataset.type = type;
-  elements.toast.classList.add("toast-visible");
+function showToast(message, type = "info", duration = 3200) {
+  const target = type === "error" ? elements.alertToast : elements.toast;
+  const inactive = type === "error" ? elements.toast : elements.alertToast;
+
+  inactive.classList.remove("toast-visible");
+  inactive.textContent = "";
+  target.textContent = message;
+  target.dataset.type = type;
+  target.classList.add("toast-visible");
   clearTimeout(showToast.timer);
+  clearTimeout(showToast.clearTimer);
   showToast.timer = setTimeout(
-    () => elements.toast.classList.remove("toast-visible"),
-    3200
+    () => {
+      target.classList.remove("toast-visible");
+      showToast.clearTimer = setTimeout(() => {
+        if (!target.classList.contains("toast-visible") && target.textContent === message) {
+          target.textContent = "";
+        }
+      }, 220);
+    },
+    duration
   );
 }
 
@@ -54,7 +86,10 @@ function setParsing(isParsing) {
   elements.parseButton.disabled = isParsing;
   elements.parseButton.classList.toggle("is-loading", isParsing);
   elements.textarea.disabled = isParsing;
+  elements.videoQuality.disabled = isParsing;
+  elements.downloadVideoButton.disabled = isParsing;
   for (const input of elements.engineInputs) input.disabled = isParsing;
+  updateSelectionUI();
 }
 
 function sanitizeFilename(value) {
@@ -69,6 +104,109 @@ function sanitizeFilename(value) {
 
 function imageFilename(image) {
   return `${String(image.index).padStart(2, "0")}.jpg`;
+}
+
+function extractSourceUrl(text) {
+  const match = String(text ?? "").match(/https?:\/\/[^\s<>'"”]+/i);
+  return match?.[0].replace(/[.,;:!?\])}，。！？；：）】》]+$/g, "") || "";
+}
+
+function noteClipboardText() {
+  const title = String(state.title || "").trim();
+  const content = String(state.content || "").trim();
+
+  if (!content) return title;
+  if (!title || content === title || content.startsWith(`${title}\n`)) return content;
+  return `${title}\n\n${content}`;
+}
+
+function noteTextFileData() {
+  return makeNoteTextFileData({
+    title: state.title,
+    content: state.content,
+    sourceUrl: state.sourceUrl,
+    engine: engineLabel(state.parseEngine)
+  });
+}
+
+function fallbackCopyText(text) {
+  const activeElement = document.activeElement;
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.readOnly = true;
+  textarea.tabIndex = -1;
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  let copied = false;
+  try {
+    document.body.append(textarea);
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    copied = document.execCommand("copy");
+  } finally {
+    textarea.remove();
+    if (activeElement instanceof HTMLElement) activeElement.focus({ preventScroll: true });
+  }
+  if (!copied) throw new Error("浏览器未允许复制文本。");
+}
+
+async function writeTextToClipboard(text) {
+  if (window.isSecureContext && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (error) {
+      try {
+        fallbackCopyText(text);
+        return;
+      } catch {
+        throw error;
+      }
+    }
+  }
+  fallbackCopyText(text);
+}
+
+function textClipboardErrorMessage(error, label) {
+  if (!window.isSecureContext) {
+    return `${label}未复制：请通过 HTTPS 或 localhost 打开页面，或手动选择文本复制。`;
+  }
+  if (error?.name === "NotAllowedError") {
+    return `${label}未复制：浏览器未授予剪贴板权限，请允许访问后重试。`;
+  }
+  if (["NotSupportedError", "DataError"].includes(error?.name)) {
+    return `${label}未复制：当前浏览器不支持该剪贴板操作，请手动选择文本复制。`;
+  }
+  return `${label}未复制：${error?.message || "浏览器拒绝了剪贴板写入"} 请手动选择文本复制。`;
+}
+
+async function copyTextAction({ text, trigger, label, successMessage }) {
+  if (state.busy || !text) return;
+
+  state.busy = true;
+  trigger?.setAttribute("aria-busy", "true");
+  elements.parseButton.disabled = true;
+  elements.videoQuality.disabled = true;
+  elements.downloadVideoButton.disabled = true;
+  for (const input of elements.engineInputs) input.disabled = true;
+  updateSelectionUI();
+
+  try {
+    await writeTextToClipboard(text);
+    showToast(successMessage, "success");
+  } catch (error) {
+    showToast(textClipboardErrorMessage(error, label), "error", 6200);
+  } finally {
+    state.busy = false;
+    trigger?.removeAttribute("aria-busy");
+    elements.parseButton.disabled = false;
+    elements.videoQuality.disabled = false;
+    elements.downloadVideoButton.disabled = false;
+    for (const input of elements.engineInputs) input.disabled = false;
+    updateSelectionUI();
+    trigger?.focus({ preventScroll: true });
+  }
 }
 
 function engineLabel(engine = state.engine) {
@@ -92,7 +230,7 @@ function updateResultMeta() {
   if (state.images.length) parts.push(`${state.images.length} 张无水印原图`);
   if (state.videos.length) parts.push(`${state.videos.length} 个视频清晰度`);
   elements.resultMeta.textContent =
-    `已找到 ${parts.join("、")} · ${engineLabel()} 引擎${strategy}`;
+    `已找到 ${parts.join("、")} · ${engineLabel(state.parseEngine)} 引擎${strategy}`;
 }
 
 function proxyUrl(image) {
@@ -140,19 +278,69 @@ async function readApiError(response) {
   }
 }
 
-async function fetchImageBlob(image) {
-  const response = await fetch(proxyUrl(image));
+async function responseBlobWithLimit(response, maxBytes = 0) {
+  const contentType = response.headers.get("content-type") || "";
+  if (!maxBytes) return response.blob();
 
-  if (response.ok) return response.blob();
+  const contentLength = Number(response.headers.get("content-length") || 0);
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    const error = new Error("单张原图超过 30 MB，请改用下载原图或 ZIP。");
+    error.name = "ImageTooLargeError";
+    throw error;
+  }
+
+  if (!response.body?.getReader) {
+    const blob = await response.blob();
+    if (blob.size > maxBytes) {
+      const error = new Error("单张原图超过 30 MB，请改用下载原图或 ZIP。");
+      error.name = "ImageTooLargeError";
+      throw error;
+    }
+    return blob;
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel().catch(() => {});
+        const error = new Error("单张原图超过 30 MB，请改用下载原图或 ZIP。");
+        error.name = "ImageTooLargeError";
+        throw error;
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
+  }
+
+  return new Blob(chunks, { type: contentType });
+}
+
+async function fetchImageBlob(image, { signal, maxBytes = 0 } = {}) {
+  const response = await fetch(proxyUrl(image), { signal });
+
+  if (response.ok) return responseBlobWithLimit(response, maxBytes);
 
   if (response.status === 413) {
     try {
       const directResponse = await fetch(image.url, {
         mode: "cors",
-        referrerPolicy: "no-referrer"
+        referrerPolicy: "no-referrer",
+        signal
       });
-      if (directResponse.ok) return directResponse.blob();
-    } catch {
+      if (directResponse.ok) {
+        return responseBlobWithLimit(directResponse, maxBytes);
+      }
+    } catch (error) {
+      if (["AbortError", "ImageTooLargeError"].includes(error?.name)) throw error;
       // 继续抛出更明确的提示。
     }
 
@@ -164,7 +352,467 @@ async function fetchImageBlob(image) {
   throw new Error(await readApiError(response));
 }
 
+function imageClipboardCapabilityError() {
+  if (!window.isSecureContext) {
+    return "图片未复制：请通过 HTTPS 或 localhost 打开页面后重试。";
+  }
+  if (!navigator.clipboard?.write || typeof window.ClipboardItem !== "function") {
+    return "图片未复制：当前浏览器不支持直接写入图片剪贴板，请下载原图或复制链接。";
+  }
+  if (
+    typeof window.ClipboardItem.supports === "function" &&
+    !window.ClipboardItem.supports("image/png")
+  ) {
+    return "图片未复制：当前浏览器剪贴板不支持 PNG 图片，请下载原图或复制链接。";
+  }
+  return "";
+}
+
+function abortError() {
+  const error = new Error("图片复制任务已停止。");
+  error.name = "AbortError";
+  return error;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw abortError();
+}
+
+function raceWithAbort(promise, signal, onLateResolve) {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    promise.then(onLateResolve, () => {});
+    return Promise.reject(abortError());
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const handleAbort = () => {
+      if (settled) return;
+      settled = true;
+      reject(abortError());
+    };
+    signal.addEventListener("abort", handleAbort, { once: true });
+    promise.then(
+      (value) => {
+        if (settled) {
+          onLateResolve?.(value);
+          return;
+        }
+        settled = true;
+        signal.removeEventListener("abort", handleAbort);
+        resolve(value);
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", handleAbort);
+        reject(error);
+      }
+    );
+  });
+}
+
+function validateImageDimensions(width, height) {
+  if (
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width <= 0 ||
+    height <= 0 ||
+    height > Math.floor(MAX_CLIPBOARD_PIXELS / width)
+  ) {
+    throw new Error("单张图片像素过大，无法安全写入剪贴板，请下载原图。");
+  }
+}
+
+function imageDimensionsFromHeader(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const has = (offset, values) =>
+    offset + values.length <= bytes.length &&
+    values.every((value, index) => bytes[offset + index] === value);
+
+  if (has(0, [0x89, 0x50, 0x4e, 0x47]) && bytes.length >= 24) {
+    return { width: view.getUint32(16), height: view.getUint32(20) };
+  }
+
+  if (
+    bytes.length >= 10 &&
+    (has(0, [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]) ||
+      has(0, [0x47, 0x49, 0x46, 0x38, 0x39, 0x61]))
+  ) {
+    return { width: view.getUint16(6, true), height: view.getUint16(8, true) };
+  }
+
+  if (has(0, [0xff, 0xd8])) {
+    const startOfFrameMarkers = new Set([
+      0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7,
+      0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf
+    ]);
+    let offset = 2;
+    while (offset + 8 < bytes.length) {
+      while (offset < bytes.length && bytes[offset] !== 0xff) offset += 1;
+      while (offset < bytes.length && bytes[offset] === 0xff) offset += 1;
+      if (offset >= bytes.length) break;
+      const marker = bytes[offset];
+      offset += 1;
+      if (marker === 0xd8 || marker === 0xd9 || marker === 0x01) continue;
+      if (offset + 2 > bytes.length) break;
+      const segmentLength = view.getUint16(offset);
+      if (segmentLength < 2 || offset + segmentLength > bytes.length) break;
+      if (startOfFrameMarkers.has(marker) && segmentLength >= 7) {
+        return {
+          width: view.getUint16(offset + 5),
+          height: view.getUint16(offset + 3)
+        };
+      }
+      offset += segmentLength;
+    }
+  }
+
+  if (
+    bytes.length >= 30 &&
+    has(0, [0x52, 0x49, 0x46, 0x46]) &&
+    has(8, [0x57, 0x45, 0x42, 0x50])
+  ) {
+    if (has(12, [0x56, 0x50, 0x38, 0x58])) {
+      return {
+        width: 1 + bytes[24] + (bytes[25] << 8) + (bytes[26] << 16),
+        height: 1 + bytes[27] + (bytes[28] << 8) + (bytes[29] << 16)
+      };
+    }
+    if (has(12, [0x56, 0x50, 0x38, 0x4c]) && bytes[20] === 0x2f) {
+      return {
+        width: 1 + (((bytes[22] & 0x3f) << 8) | bytes[21]),
+        height: 1 + (((bytes[24] & 0x0f) << 10) | (bytes[23] << 2) | ((bytes[22] & 0xc0) >> 6))
+      };
+    }
+    if (has(12, [0x56, 0x50, 0x38, 0x20]) && has(23, [0x9d, 0x01, 0x2a])) {
+      return {
+        width: view.getUint16(26, true) & 0x3fff,
+        height: view.getUint16(28, true) & 0x3fff
+      };
+    }
+  }
+
+  // AVIF / HEIF 的 ispe 属性在解码前就能提供画布尺寸。
+  for (let offset = 4; offset + 16 <= bytes.length; offset += 1) {
+    if (has(offset, [0x69, 0x73, 0x70, 0x65])) {
+      const boxSize = view.getUint32(offset - 4);
+      if (boxSize < 20) continue;
+      const width = view.getUint32(offset + 8);
+      const height = view.getUint32(offset + 12);
+      if (width && height) return { width, height };
+    }
+  }
+
+  return null;
+}
+
+async function inspectImageDimensions(blob, signal) {
+  const header = new Uint8Array(
+    await raceWithAbort(
+      blob.slice(0, IMAGE_HEADER_INSPECTION_BYTES).arrayBuffer(),
+      signal
+    )
+  );
+  return imageDimensionsFromHeader(header);
+}
+
+function canvasToPngBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("浏览器无法把这张图片转换为 PNG。"));
+    }, "image/png");
+  });
+}
+
+async function imageBlobToPng(blob, signal) {
+  throwIfAborted(signal);
+  if (!String(blob.type || "").startsWith("image/")) {
+    throw new Error("原图响应不是可复制的图片格式。");
+  }
+  if (blob.size > MAX_CLIPBOARD_SOURCE_BYTES) {
+    throw new Error("单张原图超过 30 MB，请改用下载原图或 ZIP。");
+  }
+
+  const headerDimensions = await inspectImageDimensions(blob, signal);
+  if (headerDimensions) {
+    validateImageDimensions(headerDimensions.width, headerDimensions.height);
+  }
+
+  async function drawToPng(source, width, height) {
+    throwIfAborted(signal);
+    validateImageDimensions(width, height);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("浏览器无法创建图片转换画布。");
+    try {
+      context.drawImage(source, 0, 0);
+      throwIfAborted(signal);
+      return await raceWithAbort(canvasToPngBlob(canvas), signal);
+    } finally {
+      canvas.width = 1;
+      canvas.height = 1;
+    }
+  }
+
+  if (typeof createImageBitmap === "function") {
+    let bitmap = null;
+    try {
+      bitmap = await raceWithAbort(
+        createImageBitmap(blob),
+        signal,
+        (lateBitmap) => lateBitmap?.close?.()
+      );
+    } catch (error) {
+      if (error?.name === "AbortError") throw error;
+      // 个别浏览器的 createImageBitmap 格式覆盖少于 <img>，继续尝试后者。
+    }
+    if (bitmap) {
+      try {
+        return await drawToPng(bitmap, bitmap.width, bitmap.height);
+      } finally {
+        bitmap.close?.();
+      }
+    }
+  }
+
+  const href = URL.createObjectURL(blob);
+  const image = new Image();
+  try {
+    image.decoding = "async";
+    const loadPromise = new Promise((resolve, reject) => {
+      image.addEventListener("load", resolve, { once: true });
+      image.addEventListener(
+        "error",
+        () => reject(new Error("浏览器无法读取这张原图。")),
+        { once: true }
+      );
+      image.src = href;
+    });
+    await raceWithAbort(loadPromise, signal);
+    return await drawToPng(image, image.naturalWidth, image.naturalHeight);
+  } finally {
+    image.removeAttribute("src");
+    URL.revokeObjectURL(href);
+  }
+}
+
+async function clipboardPngBlob(image, operationSignal) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const abortFromOperation = () => controller.abort();
+  operationSignal?.addEventListener("abort", abortFromOperation, { once: true });
+  if (operationSignal?.aborted) controller.abort();
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, CLIPBOARD_IMAGE_TIMEOUT_MS);
+
+  try {
+    return await imageBlobToPng(
+      await fetchImageBlob(image, {
+        signal: controller.signal,
+        maxBytes: MAX_CLIPBOARD_SOURCE_BYTES
+      }),
+      controller.signal
+    );
+  } catch (error) {
+    if (timedOut && error?.name === "AbortError") {
+      throw new Error("读取单张原图超过 20 秒，已停止复制。请检查网络后重试。");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    operationSignal?.removeEventListener("abort", abortFromOperation);
+  }
+}
+
+function createQueuedClipboardTasks(images) {
+  let nextIndex = 0;
+  let completed = 0;
+  let totalBytes = 0;
+  let started = false;
+  let cancelled = false;
+  const operationController = new AbortController();
+  const deferred = images.map(() => {
+    let resolve;
+    let reject;
+    const promise = new Promise((promiseResolve, promiseReject) => {
+      resolve = promiseResolve;
+      reject = promiseReject;
+    });
+    // 某些平台只消费第一个 ClipboardItem；仍要接住其他任务的失败。
+    promise.catch(() => {});
+    return { promise, resolve, reject, settled: false };
+  });
+
+  function settle(index, method, value) {
+    const item = deferred[index];
+    if (item.settled) return;
+    item.settled = true;
+    item[method](value);
+  }
+
+  async function worker() {
+    while (!cancelled && nextIndex < images.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      try {
+        const pngBlob = await clipboardPngBlob(
+          images[index],
+          operationController.signal
+        );
+        totalBytes += pngBlob.size;
+        if (totalBytes > MAX_CLIPBOARD_TOTAL_BYTES) {
+          throw new Error("所选图片转换后超过 120 MB，请减少勾选数量后重试。");
+        }
+        settle(index, "resolve", pngBlob);
+      } catch (error) {
+        if (error && typeof error === "object") error.clipboardStage = "conversion";
+        settle(index, "reject", error);
+      } finally {
+        if (!cancelled) {
+          completed += 1;
+          setProgress(completed, images.length, "正在准备复制图片");
+        }
+      }
+    }
+  }
+
+  function start() {
+    if (started || cancelled) return;
+    started = true;
+    const workerCount = Math.min(2, images.length);
+    for (let index = 0; index < workerCount; index += 1) void worker();
+  }
+
+  function cancel() {
+    if (cancelled) return;
+    cancelled = true;
+    operationController.abort();
+    const error = new Error("图片复制任务已停止。");
+    error.name = "AbortError";
+    for (let index = 0; index < deferred.length; index += 1) {
+      settle(index, "reject", error);
+    }
+  }
+
+  return {
+    promises: deferred.map((item) => item.promise),
+    start,
+    cancel
+  };
+}
+
+async function writeImagesToClipboard(images) {
+  const capabilityError = imageClipboardCapabilityError();
+  if (capabilityError) throw new Error(capabilityError);
+
+  setProgress(0, images.length, "正在准备复制图片");
+  const tasks = createQueuedClipboardTasks(images);
+
+  try {
+    const clipboardItems = tasks.promises.map(
+      (pngPromise) => new window.ClipboardItem({ "image/png": pngPromise })
+    );
+
+    // write() 必须仍在点击手势调用栈中触发；图片数据可通过 Promise 后续完成。
+    const writePromise = navigator.clipboard.write(clipboardItems);
+    // 超时后 writePromise 仍可能由系统结束，预先接住避免迟到拒绝泄漏。
+    writePromise.catch(() => {});
+    tasks.start();
+    // 以平台实际的 write() 结果为准；只支持首项的平台会忽略后续 Promise。
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        const error = new Error("系统剪贴板 30 秒未完成写入，已停止这次复制。");
+        error.name = "TimeoutError";
+        reject(error);
+      }, CLIPBOARD_WRITE_TIMEOUT_MS);
+    });
+    try {
+      await Promise.race([writePromise, timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  } finally {
+    tasks.cancel();
+  }
+}
+
+function imageClipboardErrorMessage(error, imageCount = 1) {
+  const capabilityError = imageClipboardCapabilityError();
+  if (capabilityError) return capabilityError;
+  if (error?.name === "NotAllowedError") {
+    return "图片未复制：浏览器未授予剪贴板权限，请直接点击复制按钮后允许访问。";
+  }
+  if (["NotSupportedError", "DataError"].includes(error?.name)) {
+    return "图片未复制：当前浏览器或目标格式不支持图片剪贴板，请下载原图或复制链接。";
+  }
+  if (error?.clipboardStage === "conversion" && imageCount > 1) {
+    return `多图复制未完整完成：${error.message || "至少一张原图读取失败"} 请减少勾选、逐张复制或下载 ZIP。`;
+  }
+  return `图片未复制：${error?.message || "读取原图失败"} 可改用下载原图、打开原图或复制链接。`;
+}
+
+async function copyImages(images, trigger) {
+  if (state.busy || images.length === 0) return;
+
+  if (images.length > MAX_CLIPBOARD_IMAGES) {
+    showToast(
+      `为避免浏览器内存过高，一次最多复制 ${MAX_CLIPBOARD_IMAGES} 张图片。请减少勾选数量，或直接下载 ZIP。`,
+      "error",
+      7200
+    );
+    return;
+  }
+
+  const capabilityError = imageClipboardCapabilityError();
+  if (capabilityError) {
+    showToast(capabilityError, "error", 6200);
+    return;
+  }
+
+  state.busy = true;
+  trigger?.setAttribute("aria-busy", "true");
+  elements.parseButton.disabled = true;
+  elements.videoQuality.disabled = true;
+  elements.downloadVideoButton.disabled = true;
+  for (const input of elements.engineInputs) input.disabled = true;
+  updateSelectionUI();
+
+  try {
+    await writeImagesToClipboard(images);
+    if (images.length === 1) {
+      showToast("图片已写入剪贴板，可以直接粘贴。", "success");
+    } else {
+      showToast(
+        "已向剪贴板写入所选图片；若粘贴后只有一张，是浏览器或系统限制，请逐张复制或下载 ZIP。",
+        "success",
+        7200
+      );
+    }
+  } catch (error) {
+    showToast(imageClipboardErrorMessage(error, images.length), "error", 7200);
+  } finally {
+    state.busy = false;
+    trigger?.removeAttribute("aria-busy");
+    elements.parseButton.disabled = false;
+    elements.videoQuality.disabled = false;
+    elements.downloadVideoButton.disabled = false;
+    for (const input of elements.engineInputs) input.disabled = false;
+    hideProgress();
+    updateSelectionUI();
+    trigger?.focus({ preventScroll: true });
+  }
+}
+
 async function downloadSingle(image) {
+  if (state.busy) return;
   try {
     showToast(`正在下载第 ${image.index} 张图片……`);
     const blob = await fetchImageBlob(image);
@@ -317,11 +965,14 @@ async function downloadCurrentVideo() {
   }
 
   state.busy = true;
+  updateSelectionUI();
   elements.downloadVideoButton.disabled = true;
   elements.parseButton.disabled = true;
   elements.videoQuality.disabled = true;
   elements.selectAllButton.disabled = true;
+  elements.copySelectedImagesButton.disabled = true;
   elements.copyLinksButton.disabled = true;
+  elements.copyCaptionButton.disabled = true;
   elements.downloadZipButton.disabled = true;
   for (const input of elements.engineInputs) input.disabled = true;
 
@@ -362,7 +1013,9 @@ async function downloadCurrentVideo() {
     elements.parseButton.disabled = false;
     elements.videoQuality.disabled = false;
     elements.selectAllButton.disabled = false;
+    elements.copySelectedImagesButton.disabled = false;
     elements.copyLinksButton.disabled = false;
+    elements.copyCaptionButton.disabled = false;
     for (const input of elements.engineInputs) input.disabled = false;
     hideProgress();
     updateSelectionUI();
@@ -376,13 +1029,37 @@ function updateSelectionUI() {
 
   for (const checkbox of checkboxes) {
     checkbox.checked = state.selected.has(Number(checkbox.dataset.index));
+    checkbox.disabled = state.busy;
+  }
+
+  for (const button of elements.imageGrid.querySelectorAll("button")) {
+    button.disabled = state.busy;
   }
 
   const allSelected =
     state.images.length > 0 && state.selected.size === state.images.length;
+  const selectedCount = state.selected.size;
+  const noSelection = selectedCount === 0;
   elements.selectAllButton.textContent = allSelected ? "取消全选" : "全部选择";
-  elements.downloadZipButton.textContent = `下载所选 ZIP（${state.selected.size}）`;
-  elements.downloadZipButton.disabled = state.selected.size === 0;
+  elements.copySelectedImagesButton.textContent = `复制图片（${selectedCount}）`;
+  elements.copySelectedImagesButton.setAttribute(
+    "aria-label",
+    `复制所选图片（${selectedCount} 张）`
+  );
+  elements.copyLinksButton.textContent = `复制链接（${selectedCount}）`;
+  elements.downloadZipButton.textContent = `下载 ZIP（${selectedCount}）`;
+  elements.selectAllButton.disabled = state.busy || state.images.length === 0;
+  elements.copySelectedImagesButton.disabled = state.busy || noSelection;
+  elements.copyLinksButton.disabled = state.busy || noSelection;
+  elements.downloadZipButton.disabled = state.busy || noSelection;
+  elements.copyCaptionButton.disabled = state.busy || !String(state.content || "").trim();
+}
+
+function renderCaption() {
+  const content = String(state.content || "").trim();
+  elements.captionSection.hidden = !content;
+  elements.noteCaption.textContent = content;
+  elements.copyCaptionButton.disabled = !content;
 }
 
 function renderResults() {
@@ -390,6 +1067,7 @@ function renderResults() {
   elements.resultSection.hidden = false;
   elements.noteTitle.textContent = state.title;
   updateResultMeta();
+  renderCaption();
   renderVideo();
 
   const hasImages = state.images.length > 0;
@@ -411,6 +1089,7 @@ function renderResults() {
       </div>
       <div class="image-card-actions">
         <button class="card-button download-one" type="button">下载原图</button>
+        <button class="card-button card-button-copy copy-image" type="button" aria-label="复制第 ${image.index} 张图片">复制图片</button>
         <a class="card-button card-button-muted" href="${image.url}" target="_blank" rel="noopener noreferrer">打开原图</a>
       </div>
     `;
@@ -427,6 +1106,8 @@ function renderResults() {
     card
       .querySelector(".download-one")
       .addEventListener("click", () => downloadSingle(image));
+    const copyButton = card.querySelector(".copy-image");
+    copyButton.addEventListener("click", () => copyImages([image], copyButton));
     elements.imageGrid.append(card);
   }
 
@@ -456,113 +1137,6 @@ async function parseShareText(text, engine) {
   return payload;
 }
 
-// 无依赖 ZIP Store 实现。图片本身已经压缩，使用 Store 更快，
-// 也避免依赖第三方 CDN 或 npm 包。
-const CRC_TABLE = (() => {
-  const table = new Uint32Array(256);
-  for (let index = 0; index < 256; index += 1) {
-    let value = index;
-    for (let bit = 0; bit < 8; bit += 1) {
-      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-    }
-    table[index] = value >>> 0;
-  }
-  return table;
-})();
-
-function crc32(bytes) {
-  let crc = 0xffffffff;
-  for (const byte of bytes) {
-    crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function dosDateTime(date = new Date()) {
-  const year = Math.max(1980, date.getFullYear());
-  const dosTime =
-    (date.getHours() << 11) |
-    (date.getMinutes() << 5) |
-    Math.floor(date.getSeconds() / 2);
-  const dosDate =
-    ((year - 1980) << 9) |
-    ((date.getMonth() + 1) << 5) |
-    date.getDate();
-  return { dosTime, dosDate };
-}
-
-function makeZipBlob(files) {
-  const encoder = new TextEncoder();
-  const localParts = [];
-  const centralParts = [];
-  const { dosTime, dosDate } = dosDateTime();
-  let localOffset = 0;
-  let centralSize = 0;
-
-  for (const file of files) {
-    const nameBytes = encoder.encode(file.name);
-    const data = file.data;
-    const checksum = crc32(data);
-
-    const localHeader = new Uint8Array(30 + nameBytes.length);
-    const localView = new DataView(localHeader.buffer);
-    localView.setUint32(0, 0x04034b50, true);
-    localView.setUint16(4, 20, true);
-    localView.setUint16(6, 0x0800, true);
-    localView.setUint16(8, 0, true);
-    localView.setUint16(10, dosTime, true);
-    localView.setUint16(12, dosDate, true);
-    localView.setUint32(14, checksum, true);
-    localView.setUint32(18, data.byteLength, true);
-    localView.setUint32(22, data.byteLength, true);
-    localView.setUint16(26, nameBytes.length, true);
-    localView.setUint16(28, 0, true);
-    localHeader.set(nameBytes, 30);
-
-    localParts.push(localHeader, data);
-
-    const centralHeader = new Uint8Array(46 + nameBytes.length);
-    const centralView = new DataView(centralHeader.buffer);
-    centralView.setUint32(0, 0x02014b50, true);
-    centralView.setUint16(4, 20, true);
-    centralView.setUint16(6, 20, true);
-    centralView.setUint16(8, 0x0800, true);
-    centralView.setUint16(10, 0, true);
-    centralView.setUint16(12, dosTime, true);
-    centralView.setUint16(14, dosDate, true);
-    centralView.setUint32(16, checksum, true);
-    centralView.setUint32(20, data.byteLength, true);
-    centralView.setUint32(24, data.byteLength, true);
-    centralView.setUint16(28, nameBytes.length, true);
-    centralView.setUint16(30, 0, true);
-    centralView.setUint16(32, 0, true);
-    centralView.setUint16(34, 0, true);
-    centralView.setUint16(36, 0, true);
-    centralView.setUint32(38, 0, true);
-    centralView.setUint32(42, localOffset, true);
-    centralHeader.set(nameBytes, 46);
-
-    centralParts.push(centralHeader);
-    centralSize += centralHeader.byteLength;
-    localOffset += localHeader.byteLength + data.byteLength;
-  }
-
-  const end = new Uint8Array(22);
-  const endView = new DataView(end.buffer);
-  endView.setUint32(0, 0x06054b50, true);
-  endView.setUint16(4, 0, true);
-  endView.setUint16(6, 0, true);
-  endView.setUint16(8, files.length, true);
-  endView.setUint16(10, files.length, true);
-  endView.setUint32(12, centralSize, true);
-  endView.setUint32(16, localOffset, true);
-  endView.setUint16(20, 0, true);
-
-  return new Blob([...localParts, ...centralParts, end], {
-    type: "application/zip"
-  });
-}
-
 async function downloadSelectedZip() {
   if (state.busy) return;
 
@@ -577,8 +1151,14 @@ async function downloadSelectedZip() {
   state.busy = true;
   elements.downloadZipButton.disabled = true;
   elements.selectAllButton.disabled = true;
+  elements.copySelectedImagesButton.disabled = true;
+  elements.copyLinksButton.disabled = true;
+  elements.copyCaptionButton.disabled = true;
   elements.parseButton.disabled = true;
+  elements.videoQuality.disabled = true;
+  elements.downloadVideoButton.disabled = true;
   for (const input of elements.engineInputs) input.disabled = true;
+  updateSelectionUI();
   const files = [];
   const failures = [];
 
@@ -610,6 +1190,11 @@ async function downloadSelectedZip() {
       throw new Error(failures[0]?.message || "所有图片均下载失败。");
     }
 
+    files.push({
+      name: "文案.txt",
+      data: noteTextFileData()
+    });
+
     setProgress(
       selectedImages.length,
       selectedImages.length,
@@ -620,18 +1205,23 @@ async function downloadSelectedZip() {
 
     if (failures.length > 0) {
       showToast(
-        `ZIP 已生成，其中 ${failures.length} 张因大小或网络限制未加入。`,
+        `ZIP 与文案 TXT 已生成，其中 ${failures.length} 张因大小或网络限制未加入。`,
         "error"
       );
     } else {
-      showToast("全部原图已打包，ZIP 开始保存。", "success");
+      showToast("全部原图与文案 TXT 已打包，ZIP 开始保存。", "success");
     }
   } catch (error) {
     showToast(error.message, "error");
   } finally {
     state.busy = false;
     elements.selectAllButton.disabled = false;
+    elements.copySelectedImagesButton.disabled = false;
+    elements.copyLinksButton.disabled = false;
+    elements.copyCaptionButton.disabled = false;
     elements.parseButton.disabled = false;
+    elements.videoQuality.disabled = false;
+    elements.downloadVideoButton.disabled = false;
     for (const input of elements.engineInputs) input.disabled = false;
     hideProgress();
     updateSelectionUI();
@@ -672,12 +1262,17 @@ elements.form.addEventListener("submit", async (event) => {
   try {
     const payload = await parseShareText(text, state.engine);
     state.title = payload.title || "小红书媒体";
+    state.content = typeof payload.content === "string" ? payload.content.trim() : "";
+    state.noteId = String(payload.noteId || "");
+    state.sourceUrl = extractSourceUrl(text);
+    state.parseEngine = payload.engine === "python" ? "python" : "node";
     state.images = payload.images || [];
     state.videos = payload.videos || [];
     state.strategy = payload.strategy || "";
     state.selected = new Set(state.images.map((image) => image.index));
     renderResults();
     const summary = [
+      state.content ? "完整文案" : "",
       state.images.length ? `${state.images.length} 张无水印原图` : "",
       state.videos.length ? `${state.videos.length} 个视频清晰度` : ""
     ].filter(Boolean).join("、");
@@ -701,6 +1296,7 @@ elements.pasteButton.addEventListener("click", async () => {
 });
 
 elements.selectAllButton.addEventListener("click", () => {
+  if (state.busy) return;
   const allSelected = state.selected.size === state.images.length;
   state.selected = allSelected
     ? new Set()
@@ -708,7 +1304,30 @@ elements.selectAllButton.addEventListener("click", () => {
   updateSelectionUI();
 });
 
-elements.copyLinksButton.addEventListener("click", async () => {
+elements.copyCaptionButton.addEventListener("click", (event) => {
+  if (state.busy) return;
+  const text = noteClipboardText();
+  if (!state.content || !text) {
+    showToast("当前笔记没有可复制的正文文案。", "error");
+    return;
+  }
+  void copyTextAction({
+    text,
+    trigger: event.currentTarget,
+    label: "文案",
+    successMessage: "笔记标题与完整文案已复制"
+  });
+});
+
+elements.copySelectedImagesButton.addEventListener("click", (event) => {
+  const selectedImages = state.images.filter((image) =>
+    state.selected.has(image.index)
+  );
+  void copyImages(selectedImages, event.currentTarget);
+});
+
+elements.copyLinksButton.addEventListener("click", (event) => {
+  if (state.busy) return;
   const links = state.images
     .filter((image) => state.selected.has(image.index))
     .map((image) => image.url)
@@ -719,12 +1338,12 @@ elements.copyLinksButton.addEventListener("click", async () => {
     return;
   }
 
-  try {
-    await navigator.clipboard.writeText(links);
-    showToast("所选原图链接已复制", "success");
-  } catch {
-    showToast("复制失败，请检查浏览器剪贴板权限。", "error");
-  }
+  void copyTextAction({
+    text: links,
+    trigger: event.currentTarget,
+    label: "链接",
+    successMessage: "所选原图链接已复制"
+  });
 });
 
 elements.videoQuality.addEventListener("change", updateVideoSelection);

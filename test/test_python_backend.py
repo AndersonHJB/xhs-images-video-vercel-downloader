@@ -302,6 +302,33 @@ class PythonBackendTests(unittest.TestCase):
         self.assertEqual(parsed["strategy"], "exact-initial-state")
         self.assertEqual(parsed["content"], "")
 
+    def test_content_unicode_limit_and_description_alias(self) -> None:
+        target_id = "ffffffffffffffffffffffff"
+        state = {
+            "note": {
+                "noteDetailMap": {
+                    target_id: {
+                        "note": {
+                            "noteId": target_id,
+                            "title": "Unicode 文案",
+                            "desc": "   ",
+                            "description": "  " + ("😀" * 10001) + "  ",
+                            "imageList": make_image_list("unicode", 1),
+                        }
+                    }
+                }
+            }
+        }
+        page_html = (
+            "<script>window.__INITIAL_STATE__="
+            + json.dumps(state, ensure_ascii=False, separators=(",", ":"))
+            + "</script>"
+        )
+
+        parsed = python_parse.parse_note_html(page_html, target_id)
+        self.assertEqual(len(parsed["content"]), 10000)
+        self.assertTrue(parsed["content"].endswith("😀"))
+
 
 
 if __name__ == "__main__":

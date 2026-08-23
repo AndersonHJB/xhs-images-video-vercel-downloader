@@ -4,9 +4,19 @@
 
 - 无水印原图
 - 视频流与多个可用清晰度
-- 图片单张下载、勾选下载与浏览器本地 ZIP
+- 当前笔记标题与正文文案
+- 文案复制、单图复制与勾选后的多图剪贴板写入
+- 图片单张下载、勾选下载与浏览器本地 ZIP（自动附带 `文案.txt`）
 - 视频浏览器分段下载、本地合并并保存为 MP4
 - Node.js / Python 双后台自由切换
+
+## 待发布功能
+
+- Node.js 与 Python 两套解析器同步读取当前 `noteId` 对应的 `desc / description`，不从相关推荐兜底。
+- 结果区可复制“标题 + 正文”的完整笔记文案。
+- 每张图片提供独立“复制图片”按钮；勾选多张后可通过标准 `ClipboardItem` 一次写入。
+- 图片 ZIP 固定加入 UTF-8 BOM 编码的 `文案.txt`，包含标题、正文、来源、生成时间与解析引擎。
+- 图片剪贴板只在 HTTPS 或 localhost 可用；部分浏览器或操作系统只保留多项剪贴板中的第一张，页面会明确提示并保留逐张复制、复制链接与 ZIP 回退。
 
 ## v1.3 更新
 
@@ -32,11 +42,15 @@
 │   ├── python_image.py     # Python 图片代理下载
 │   └── python_video.py     # Python 视频元数据与分段下载
 ├── lib/
+│   ├── archive.js          # 浏览器 ZIP Store 与文案 TXT 生成
 │   └── xhs.js              # Node.js 解析核心
 ├── test/
+│   ├── archive.test.js
 │   ├── xhs.test.js
 │   └── test_python_backend.py
 ├── app.js
+├── changelog.html
+├── changelog.css
 ├── index.html
 ├── style.css
 ├── package.json
@@ -86,12 +100,14 @@ npm test
 测试覆盖：
 
 - 当前帖子图片不会混入其他帖子图片。
+- 当前帖子文案不会混入相关推荐或页面通用描述。
 - 当前帖子视频不会混入相关推荐视频。
 - 图文笔记原有解析结果保持不变。
 - 纯视频笔记即使没有 `imageList` 也可以解析。
 - H.264、H.265、AV1 多流提取与默认选择。
 - 视频备用 CDN 地址保留。
 - Node.js 与 Python 两套解析逻辑结果一致。
+- ZIP 可解出 UTF-8 中文文件名的 `文案.txt`，且正文元数据完整。
 
 ## 接口
 
@@ -110,10 +126,12 @@ POST /api/python_parse
 }
 ```
 
-返回值中保留原有 `images` 字段，并新增：
+返回值中保留原有 `images` 字段，并新增正文与视频字段：
 
 ```json
 {
+  "title": "笔记标题",
+  "content": "笔记正文文案",
   "type": "video",
   "videoCount": 2,
   "videos": [
@@ -174,7 +192,9 @@ GET /api/python_video?action=chunk&url=...&start=0&end=3499999
 - 只允许 HTTPS 的小红书页面和 `xhscdn.com` 媒体地址。
 - 分享链接和视频 CDN 跳转目标都会校验。
 - 只解析当前 `noteId` 的媒体对象，不全局扫描推荐内容。
+- 文案只读取当前 `noteId` 已锁定笔记对象的直属字段；降级解析宁可返回空文案，也不会猜测推荐内容。
 - 单个视频限制为 512 MB，避免浏览器本地合并占用过多内存。
+- 多图复制依赖标准 Async Clipboard API、HTTPS 与目标系统的多项剪贴板能力；不支持时请逐张复制或使用 ZIP。
 - 图片与视频不会在服务器持久化。
 - 临时签名的视频链接可能过期，解析后应及时下载。
 - 仅处理公开可访问内容，请只保存自己拥有或已获授权的作品。

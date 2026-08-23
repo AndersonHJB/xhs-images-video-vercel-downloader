@@ -880,10 +880,8 @@ textarea:focus {
 }
 
 .caption-text {
-  max-height: 280px;
   margin-top: 22px;
   padding-top: 18px;
-  overflow: auto;
   border-top: 1px solid var(--line);
   color: var(--ink-light);
   font-size: 0.95rem;
@@ -1061,7 +1059,7 @@ textarea:focus {
 
 .section-aside small {
   font-family: var(--font-sans);
-  font-size: 0.66rem;
+  font-size: 0.72rem;
 }
 
 .image-grid {
@@ -1526,15 +1524,6 @@ footer > p {
     grid-column: auto;
   }
 
-  .caption-panel-heading {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .caption-panel-heading .button {
-    width: 100%;
-  }
-
   .video-section {
     border-radius: 14px;
     box-shadow: 5px 5px 0 var(--shadow-blue);
@@ -1562,10 +1551,6 @@ footer > p {
     text-align: left;
   }
 
-  .image-grid {
-    grid-template-columns: 1fr;
-  }
-
   footer {
     grid-template-columns: 1fr;
   }
@@ -1584,6 +1569,17 @@ footer > p {
     right: 12px;
     bottom: 12px;
     max-width: calc(100vw - 24px);
+  }
+}
+
+@media (max-width: 480px) {
+  .caption-panel-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .caption-panel-heading .button {
+    width: 100%;
   }
 }
 
@@ -1616,7 +1612,7 @@ footer > p {
   .result-actions .button {
     padding-right: 6px;
     padding-left: 6px;
-    font-size: 0.7rem;
+    font-size: 0.75rem;
     white-space: nowrap;
   }
 

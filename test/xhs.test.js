@@ -245,3 +245,31 @@ test("当前笔记没有文案时不从推荐内容或页面描述兜底", () =>
   assert.equal(parsed.strategy, "exact-initial-state");
   assert.equal(parsed.content, "");
 });
+
+test("文案按 Unicode 字符安全截断并兼容 description 字段", () => {
+  const targetId = "ffffffffffffffffffffffff";
+  const content = `  ${"😀".repeat(10001)}  `;
+  const state = {
+    note: {
+      noteDetailMap: {
+        [targetId]: {
+          note: {
+            noteId: targetId,
+            title: "Unicode 文案",
+            desc: "   ",
+            description: content,
+            imageList: makeImageList("unicode", 1)
+          }
+        }
+      }
+    }
+  };
+
+  const parsed = parseNoteHtml(
+    `<script>window.__INITIAL_STATE__=${JSON.stringify(state)}</script>`,
+    { noteId: targetId }
+  );
+  assert.equal(Array.from(parsed.content).length, 10000);
+  assert.equal(Array.from(parsed.content).at(-1), "😀");
+  assert.ok(!parsed.content.includes("\ufffd"));
+});
