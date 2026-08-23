@@ -68,13 +68,13 @@
           <aside class="release-summary" aria-label="项目版本概览">
             <div class="summary-heading">
               <span>REPOSITORY SNAPSHOT</span>
-              <strong>01d31b1</strong>
-              <small>origin/main · 2026.08.23 14:09</small>
+              <strong>9950b13</strong>
+              <small>origin/main · 2026.08.23 15:54</small>
             </div>
 
             <div class="summary-grid">
               <div class="summary-stat">
-                <strong>5</strong>
+                <strong>9</strong>
                 <span>历史提交</span>
               </div>
               <div class="summary-stat">
@@ -86,12 +86,12 @@
                 <span>后台引擎</span>
               </div>
               <div class="summary-stat">
-                <strong>24</strong>
+                <strong>30</strong>
                 <span>自动测试</span>
               </div>
             </div>
 
-            <p class="summary-note"><span aria-hidden="true">✦</span> 远端 main 已实时核对，仓库目前没有 Git 标签。</p>
+            <p class="summary-note"><span aria-hidden="true">✦</span> 远端 main 已实时核对；测试数包含本次工作区的待发布变更，仓库目前没有 Git 标签。</p>
           </aside>
         </section>
 
@@ -101,7 +101,8 @@
             <h2 id="ledger-title">从现在，<br />回到最初。</h2>
 
             <nav class="release-index-nav" aria-label="更新记录快速定位">
-              <a href="#mobile-share-update"><span>NOW</span><strong>手机分享短链</strong></a>
+              <a href="#clipboard-compat-update"><span>NOW</span><strong>剪贴板兼容</strong></a>
+              <a href="#mobile-share-update"><span>LINK</span><strong>手机分享短链</strong></a>
               <a href="#brand-update"><span>BRAND</span><strong>Bornforthis 品牌</strong></a>
               <a href="#clipboard-update"><span>FEATURE</span><strong>文案与多图</strong></a>
               <a href="#workspace-update"><span>STYLE</span><strong>多尺寸与记录页</strong></a>
@@ -118,7 +119,62 @@
           </aside>
 
           <div class="release-feed">
-            <article id="mobile-share-update" class="release-entry release-entry-featured">
+            <article id="clipboard-compat-update" class="release-entry release-entry-featured">
+              <div class="release-entry-rail">
+                <span class="release-dot" aria-hidden="true"></span>
+                <time datetime="2026-08-23T16:23:53+08:00">
+                  <span>08.23</span>
+                  <small>2026 · 16:23</small>
+                </time>
+              </div>
+
+              <div class="release-card">
+                <header class="release-card-heading">
+                  <div>
+                    <div class="release-badges">
+                      <span class="release-badge release-badge-red">FIX</span>
+                      <span class="release-status">兼容修复 · 待发布</span>
+                    </div>
+                    <h3>权限没问题，真正的限制说清楚</h3>
+                  </div>
+                  <span class="workspace-label">WORKSPACE</span>
+                </header>
+
+                <p class="release-lead">
+                  Chrome 会把“网页一次写入多张独立图片”作为未实现能力拒绝，并使用与权限错误相同的 NotAllowedError；页面现在会准确区分两者。
+                </p>
+
+                <div class="change-list">
+                  <div class="change-item">
+                    <span aria-hidden="true">01</span>
+                    <p><strong>修正错误归因</strong>不再把 Chromium 的 multiple ClipboardItems 限制误报为“未授予剪贴板权限”。</p>
+                  </div>
+                  <div class="change-item">
+                    <span aria-hidden="true">02</span>
+                    <p><strong>提供可操作回退</strong>检测到限制后展示持久提示，可直接复制第一张、逐张复制，或下载包含全部原图与文案的 ZIP。</p>
+                  </div>
+                  <div class="change-item">
+                    <span aria-hidden="true">03</span>
+                    <p><strong>保留平台能力</strong>单图复制保持原样；支持多个剪贴板项的浏览器仍会继续尝试一次写入所选图片。</p>
+                  </div>
+                  <div class="change-item">
+                    <span aria-hidden="true">04</span>
+                    <p><strong>署名连接项目</strong>页脚主署名更新为 Brclio，并指向当前项目 GitHub；上游设计许可另行保留。</p>
+                  </div>
+                  <div class="change-item">
+                    <span aria-hidden="true">05</span>
+                    <p><strong>错误分支验证</strong>覆盖多项限制、已授权辨识、权限拒绝、页面失焦、Permissions Policy 与格式不支持，自动测试达到 30 项。</p>
+                  </div>
+                </div>
+
+                <div class="release-card-footer">
+                  <span>SCOPE · CLIPBOARD / UX / CREDIT</span>
+                  <span>自动测试 · 30</span>
+                </div>
+              </div>
+            </article>
+
+            <article id="mobile-share-update" class="release-entry">
               <div class="release-entry-rail">
                 <span class="release-dot" aria-hidden="true"></span>
                 <time datetime="2026-08-23T15:40:03+08:00">
@@ -612,13 +668,21 @@
           <span class="footer-mark" aria-hidden="true">↓</span>
           <strong>每次改变，都讲清楚。</strong>
         </div>
-        <p>本页基于 origin/main 的 Git 提交记录整理，截至 01d31b1。</p>
-        <a
-          class="design-credit"
-          href="https://github.com/esthersjw/esther-design-system"
-          target="_blank"
-          rel="noopener noreferrer"
-        >Design system by ESTHER不二 · CC BY-NC-SA 4.0</a>
+        <p>本页基于 origin/main 的 Git 提交记录整理，截至 9950b13。</p>
+        <div class="footer-credits">
+          <a
+            class="design-credit"
+            href="https://github.com/AndersonHJB/xhs-images-video-vercel-downloader"
+            target="_blank"
+            rel="noopener noreferrer"
+          >Built by Brclio · Project GitHub</a>
+          <a
+            class="design-license-credit"
+            href="https://github.com/esthersjw/esther-design-system"
+            target="_blank"
+            rel="noopener noreferrer"
+          >Design foundation: ESTHER不二 · CC BY-NC-SA 4.0</a>
+        </div>
       </footer>
     </div>
 

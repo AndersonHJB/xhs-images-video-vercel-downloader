@@ -1,4 +1,9 @@
 import { makeNoteTextFileData, makeZipBlob } from "./lib/archive.js";
+import {
+  clipboardWriteFailureKind,
+  clipboardWriteFailureMessageForKind,
+  refineClipboardWriteFailureKind
+} from "./lib/clipboard.js";
 
 const state = {
   title: "小红书图片",
@@ -10,6 +15,7 @@ const state = {
   videos: [],
   selected: new Set(),
   busy: false,
+  multipleClipboardItemsSupported: null,
   engine: localStorage.getItem("xhs-engine") === "python" ? "python" : "node",
   strategy: ""
 };
@@ -45,6 +51,10 @@ const elements = {
   openVideoLink: document.querySelector("#open-video-link"),
   selectAllButton: document.querySelector("#select-all-button"),
   copySelectedImagesButton: document.querySelector("#copy-selected-images-button"),
+  clipboardFallback: document.querySelector("#clipboard-fallback"),
+  copyFirstSelectedImageButton: document.querySelector(
+    "#copy-first-selected-image-button"
+  ),
   copyLinksButton: document.querySelector("#copy-links-button"),
   downloadZipButton: document.querySelector("#download-zip-button"),
   progressPanel: document.querySelector("#progress-panel"),
@@ -725,7 +735,7 @@ async function writeImagesToClipboard(images) {
     // 超时后 writePromise 仍可能由系统结束，预先接住避免迟到拒绝泄漏。
     writePromise.catch(() => {});
     tasks.start();
-    // 以平台实际的 write() 结果为准；只支持首项的平台会忽略后续 Promise。
+    // 以平台实际的 write() 结果为准；Chromium 会直接拒绝多个 ClipboardItem。
     let timeoutId;
     const timeoutPromise = new Promise((_, reject) => {
       timeoutId = setTimeout(() => {
@@ -744,15 +754,38 @@ async function writeImagesToClipboard(images) {
   }
 }
 
-function imageClipboardErrorMessage(error, imageCount = 1) {
+async function resolvedClipboardWriteFailureKind(error, imageCount) {
+  const detectedKind = clipboardWriteFailureKind(error, imageCount);
+  if (
+    detectedKind !== "permission" ||
+    imageCount <= 1 ||
+    !navigator.permissions?.query
+  ) {
+    return detectedKind;
+  }
+
+  try {
+    const permission = await navigator.permissions.query({
+      name: "clipboard-write"
+    });
+    return refineClipboardWriteFailureKind(
+      detectedKind,
+      imageCount,
+      permission.state
+    );
+  } catch {
+    // 并非所有浏览器都在 Permissions API 中暴露 clipboard-write。
+  }
+  return detectedKind;
+}
+
+function imageClipboardErrorMessage(error, imageCount = 1, failureKind = null) {
   const capabilityError = imageClipboardCapabilityError();
   if (capabilityError) return capabilityError;
-  if (error?.name === "NotAllowedError") {
-    return "图片未复制：浏览器未授予剪贴板权限，请直接点击复制按钮后允许访问。";
-  }
-  if (["NotSupportedError", "DataError"].includes(error?.name)) {
-    return "图片未复制：当前浏览器或目标格式不支持图片剪贴板，请下载原图或复制链接。";
-  }
+  const writeFailureMessage = clipboardWriteFailureMessageForKind(
+    failureKind || clipboardWriteFailureKind(error, imageCount)
+  );
+  if (writeFailureMessage) return writeFailureMessage;
   if (error?.clipboardStage === "conversion" && imageCount > 1) {
     return `多图复制未完整完成：${error.message || "至少一张原图读取失败"} 请减少勾选、逐张复制或下载 ZIP。`;
   }
@@ -790,14 +823,27 @@ async function copyImages(images, trigger) {
     if (images.length === 1) {
       showToast("图片已写入剪贴板，可以直接粘贴。", "success");
     } else {
+      state.multipleClipboardItemsSupported = true;
       showToast(
-        "已向剪贴板写入所选图片；若粘贴后只有一张，是浏览器或系统限制，请逐张复制或下载 ZIP。",
+        "浏览器已接收所选图片；目标应用若只粘贴一张，请逐张复制或下载 ZIP。",
         "success",
         7200
       );
     }
   } catch (error) {
-    showToast(imageClipboardErrorMessage(error, images.length), "error", 7200);
+    const failureKind = await resolvedClipboardWriteFailureKind(
+      error,
+      images.length
+    );
+    if (failureKind === "multiple-items") {
+      state.multipleClipboardItemsSupported = false;
+      updateSelectionUI();
+    }
+    showToast(
+      imageClipboardErrorMessage(error, images.length, failureKind),
+      "error",
+      7200
+    );
   } finally {
     state.busy = false;
     trigger?.removeAttribute("aria-busy");
@@ -1040,16 +1086,38 @@ function updateSelectionUI() {
     state.images.length > 0 && state.selected.size === state.images.length;
   const selectedCount = state.selected.size;
   const noSelection = selectedCount === 0;
+  const firstSelectedImage = state.images.find((image) =>
+    state.selected.has(image.index)
+  );
+  const multipleItemsBlocked =
+    state.multipleClipboardItemsSupported === false && selectedCount > 1;
   elements.selectAllButton.textContent = allSelected ? "取消全选" : "全部选择";
-  elements.copySelectedImagesButton.textContent = `复制图片（${selectedCount}）`;
+  elements.copySelectedImagesButton.textContent = multipleItemsBlocked
+    ? `多图复制受限（${selectedCount}）`
+    : `复制图片（${selectedCount}）`;
   elements.copySelectedImagesButton.setAttribute(
     "aria-label",
-    `复制所选图片（${selectedCount} 张）`
+    multipleItemsBlocked
+      ? `当前浏览器不支持一次复制 ${selectedCount} 张独立图片`
+      : `复制所选图片（${selectedCount} 张）`
+  );
+  elements.copySelectedImagesButton.setAttribute(
+    "aria-describedby",
+    multipleItemsBlocked
+      ? "clipboard-fallback-title clipboard-hint"
+      : "clipboard-hint"
   );
   elements.copyLinksButton.textContent = `复制链接（${selectedCount}）`;
   elements.downloadZipButton.textContent = `下载 ZIP（${selectedCount}）`;
   elements.selectAllButton.disabled = state.busy || state.images.length === 0;
-  elements.copySelectedImagesButton.disabled = state.busy || noSelection;
+  elements.copySelectedImagesButton.disabled =
+    state.busy || noSelection || multipleItemsBlocked;
+  elements.clipboardFallback.hidden = !multipleItemsBlocked;
+  elements.copyFirstSelectedImageButton.textContent = firstSelectedImage
+    ? `复制第 ${firstSelectedImage.index} 张`
+    : "复制首张";
+  elements.copyFirstSelectedImageButton.disabled =
+    state.busy || !firstSelectedImage;
   elements.copyLinksButton.disabled = state.busy || noSelection;
   elements.downloadZipButton.disabled = state.busy || noSelection;
   elements.copyCaptionButton.disabled = state.busy || !String(state.content || "").trim();
@@ -1324,6 +1392,17 @@ elements.copySelectedImagesButton.addEventListener("click", (event) => {
     state.selected.has(image.index)
   );
   void copyImages(selectedImages, event.currentTarget);
+});
+
+elements.copyFirstSelectedImageButton.addEventListener("click", (event) => {
+  const firstSelectedImage = state.images.find((image) =>
+    state.selected.has(image.index)
+  );
+  if (!firstSelectedImage) {
+    showToast("请先选择至少一张图片。", "error");
+    return;
+  }
+  void copyImages([firstSelectedImage], event.currentTarget);
 });
 
 elements.copyLinksButton.addEventListener("click", (event) => {

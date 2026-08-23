@@ -177,6 +177,24 @@
             </div>
           </div>
 
+          <aside
+            id="clipboard-fallback"
+            class="clipboard-fallback"
+            aria-labelledby="clipboard-fallback-title"
+            hidden
+          >
+            <span class="clipboard-fallback-label">CLIPBOARD / 浏览器限制</span>
+            <div>
+              <strong id="clipboard-fallback-title">权限已经生效，多图写入仍受 Chrome 限制。</strong>
+              <p>Chrome 暂不允许网页一次写入多张独立图片。你可以复制首张后逐张处理，或下载包含全部原图的 ZIP。</p>
+            </div>
+            <button
+              id="copy-first-selected-image-button"
+              class="button button-secondary"
+              type="button"
+            >复制首张</button>
+          </aside>
+
           <section id="caption-section" class="caption-panel" aria-labelledby="caption-heading" hidden>
             <div class="caption-panel-heading">
               <div>
@@ -231,8 +249,8 @@
                 <h3>无水印原图</h3>
               </div>
               <span id="clipboard-hint" class="section-aside">
-                勾选后可批量复制 · ZIP 自动附带文案 TXT<br />
-                <small>部分浏览器或系统粘贴时仅保留第一张 · 单次最多复制 12 张</small>
+                支持逐张复制 · 可用浏览器将尝试多图写入<br />
+                <small>Chrome 目前不支持网页复制多张独立图片 · ZIP 自动附带文案 TXT</small>
               </span>
             </div>
             <div id="image-grid" class="image-grid"></div>
@@ -246,12 +264,20 @@
           <strong>媒体只经过你的浏览器。</strong>
         </div>
         <p>图片 ZIP 与视频文件都在本地生成，不会上传到本站存储。</p>
-        <a
-          class="design-credit"
-          href="https://github.com/esthersjw/esther-design-system"
-          target="_blank"
-          rel="noopener noreferrer"
-        >Design system by ESTHER不二 · CC BY-NC-SA 4.0</a>
+        <div class="footer-credits">
+          <a
+            class="design-credit"
+            href="https://github.com/AndersonHJB/xhs-images-video-vercel-downloader"
+            target="_blank"
+            rel="noopener noreferrer"
+          >Built by Brclio · Project GitHub</a>
+          <a
+            class="design-license-credit"
+            href="https://github.com/esthersjw/esther-design-system"
+            target="_blank"
+            rel="noopener noreferrer"
+          >Design foundation: ESTHER不二 · CC BY-NC-SA 4.0</a>
+        </div>
       </footer>
     </div>
 
