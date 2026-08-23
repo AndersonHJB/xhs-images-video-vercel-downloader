@@ -86,7 +86,7 @@
                 <span>后台引擎</span>
               </div>
               <div class="summary-stat">
-                <strong>19</strong>
+                <strong>24</strong>
                 <span>自动测试</span>
               </div>
             </div>
@@ -101,7 +101,8 @@
             <h2 id="ledger-title">从现在，<br />回到最初。</h2>
 
             <nav class="release-index-nav" aria-label="更新记录快速定位">
-              <a href="#brand-update"><span>NOW</span><strong>Bornforthis 品牌</strong></a>
+              <a href="#mobile-share-update"><span>NOW</span><strong>手机分享短链</strong></a>
+              <a href="#brand-update"><span>BRAND</span><strong>Bornforthis 品牌</strong></a>
               <a href="#clipboard-update"><span>FEATURE</span><strong>文案与多图</strong></a>
               <a href="#workspace-update"><span>STYLE</span><strong>多尺寸与记录页</strong></a>
               <a href="#ui-refresh"><span>08.23</span><strong>界面重构</strong></a>
@@ -117,7 +118,58 @@
           </aside>
 
           <div class="release-feed">
-            <article id="brand-update" class="release-entry release-entry-featured">
+            <article id="mobile-share-update" class="release-entry release-entry-featured">
+              <div class="release-entry-rail">
+                <span class="release-dot" aria-hidden="true"></span>
+                <time datetime="2026-08-23T15:40:03+08:00">
+                  <span>08.23</span>
+                  <small>2026 · 15:40</small>
+                </time>
+              </div>
+
+              <div class="release-card">
+                <header class="release-card-heading">
+                  <div>
+                    <div class="release-badges">
+                      <span class="release-badge release-badge-yellow">FEATURE</span>
+                      <span class="release-status">功能增加 · 待发布</span>
+                    </div>
+                    <h3>电脑长链与手机短链，自动识别</h3>
+                  </div>
+                  <span class="workspace-label">WORKSPACE</span>
+                </header>
+
+                <p class="release-lead">
+                  整段粘贴小红书分享文案即可：电脑端完整链接和手机端 xhslink.cn 短链会自动进入同一解析流程。
+                </p>
+
+                <div class="change-list">
+                  <div class="change-item">
+                    <span aria-hidden="true">01</span>
+                    <p><strong>支持手机短链</strong>Node 与 Python 现可安全跟随 xhslink.cn 跳转，再从最终笔记页识别 noteId。</p>
+                  </div>
+                  <div class="change-item">
+                    <span aria-hidden="true">02</span>
+                    <p><strong>整段文案自动选链</strong>可跳过非小红书 URL，兼容 Markdown 包裹及转义后的电脑、手机分享链接。</p>
+                  </div>
+                  <div class="change-item">
+                    <span aria-hidden="true">03</span>
+                    <p><strong>重定向安全收口</strong>每一跳都要求 HTTPS、无账号信息且仅使用安全端口，恶意域名会在发起下一次请求前被拦截。</p>
+                  </div>
+                  <div class="change-item">
+                    <span aria-hidden="true">04</span>
+                    <p><strong>双引擎镜像验证</strong>新增手机短链、电脑长链、跳转与安全边界测试，自动测试总数达到 24 项。</p>
+                  </div>
+                </div>
+
+                <div class="release-card-footer">
+                  <span>SCOPE · URL / REDIRECT / SECURITY</span>
+                  <span>自动测试 · 24</span>
+                </div>
+              </div>
+            </article>
+
+            <article id="brand-update" class="release-entry">
               <div class="release-entry-rail">
                 <span class="release-dot" aria-hidden="true"></span>
                 <time datetime="2026-08-23T15:27:32+08:00">

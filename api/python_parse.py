@@ -16,7 +16,9 @@ from urllib.parse import quote, unquote, urljoin, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-URL_PATTERN = re.compile(r"https?://[^\s<>'\"，。！？、]+", re.I)
+URL_PATTERN = re.compile(r"https?://[^\s<>'\"()[\]{}，。！？、]+", re.I)
+MARKDOWN_URL_PATTERN = re.compile(r"\]\(\s*(https?://[^)\s<>]+)\s*\)", re.I)
+MARKDOWN_ESCAPE_PATTERN = re.compile(r"\\([^A-Za-z0-9\s])")
 XHS_IMAGE_PATTERN = re.compile(
     r"https?:(?:(?:\\u002[fF])|(?:\\/)|/){2}"
     r"[^\"'<>\\\s]+?(?:xhscdn\.com|ci\.xiaohongshu\.com)"
@@ -132,32 +134,60 @@ def is_xhs_video_url(value: Any) -> bool:
     )
 
 
-def is_allowed_page_host(hostname: str) -> bool:
-    host = hostname.lower()
+def is_allowed_page_host(hostname: str | None) -> bool:
+    host = (hostname or "").lower().rstrip(".")
     return (
         host == "xhslink.com"
         or host.endswith(".xhslink.com")
+        or host == "xhslink.cn"
+        or host.endswith(".xhslink.cn")
         or host == "xiaohongshu.com"
         or host.endswith(".xiaohongshu.com")
     )
 
 
+def is_allowed_page_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+        port = parsed.port
+    except ValueError:
+        return False
+    return bool(
+        parsed.scheme.lower() == "https"
+        and not parsed.username
+        and not parsed.password
+        and port in (None, 443)
+        and is_allowed_page_host(parsed.hostname)
+    )
+
+
 def extract_input_url(text: str) -> str:
-    match = URL_PATTERN.search(text.strip())
-    if not match:
+    input_text = text.strip()
+    candidates = MARKDOWN_URL_PATTERN.findall(input_text)
+    candidates.extend(match.group(0) for match in URL_PATTERN.finditer(input_text))
+    if not candidates:
         raise XhsError("没有检测到有效链接，请粘贴小红书分享文案或链接。")
 
-    value = normalize_image_url(
-        match.group(0).rstrip(".,;:!?)]}，。！？；：）】》")
-    )
-    parsed = urlparse(value)
-    if not parsed.scheme or not parsed.netloc:
-        raise XhsError("链接格式无效。")
+    found_parsed_url = False
+    for candidate in dict.fromkeys(candidates):
+        markdown_unescaped = MARKDOWN_ESCAPE_PATTERN.sub(r"\1", candidate)
+        value = normalize_image_url(
+            markdown_unescaped.rstrip(".,;:!?)]}，。！？；：）】》")
+        )
+        try:
+            parsed = urlparse(value)
+        except ValueError:
+            continue
+        if not parsed.scheme or not parsed.netloc:
+            continue
+        found_parsed_url = True
 
-    host = parsed.netloc.lower()
-    if not is_allowed_page_host(host) and not is_xhs_image_url(value):
-        raise XhsError("只支持小红书分享链接或小红书图片链接。")
-    return value
+        if is_allowed_page_url(value) or is_xhs_image_url(value):
+            return value
+
+    if not found_parsed_url:
+        raise XhsError("链接格式无效。")
+    raise XhsError("只支持小红书分享链接或小红书图片链接。")
 
 
 def extract_note_id(value: str) -> str | None:
@@ -990,8 +1020,7 @@ class SafeRedirectHandler(HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
         target = urljoin(req.full_url, newurl)
-        parsed = urlparse(target)
-        if not is_allowed_page_host(parsed.netloc):
+        if not is_allowed_page_url(target):
             raise XhsError("分享链接跳转到了不受支持的地址。")
         return super().redirect_request(req, fp, code, msg, headers, target)
 
@@ -1015,8 +1044,7 @@ def read_limited(response, max_bytes: int = MAX_HTML_BYTES) -> bytes:
 
 
 def fetch_note_page(input_url: str) -> tuple[str, str]:
-    parsed = urlparse(input_url)
-    if not is_allowed_page_host(parsed.netloc):
+    if not is_allowed_page_url(input_url):
         raise XhsError("分享链接地址不受支持。")
 
     opener = build_opener(SafeRedirectHandler())
@@ -1025,8 +1053,7 @@ def fetch_note_page(input_url: str) -> tuple[str, str]:
     try:
         with opener.open(request, timeout=15) as response:
             final_url = response.geturl()
-            final_host = urlparse(final_url).netloc
-            if not is_allowed_page_host(final_host):
+            if not is_allowed_page_url(final_url):
                 raise XhsError("分享链接跳转到了不受支持的地址。")
             raw = read_limited(response)
             charset = response.headers.get_content_charset() or "utf-8"

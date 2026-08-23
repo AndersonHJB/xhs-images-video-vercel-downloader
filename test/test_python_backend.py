@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -49,6 +50,81 @@ class PythonBackendTests(unittest.TestCase):
             ),
             "1234567890abcdef12345678",
         )
+
+    def test_mobile_short_link_input_and_host_boundary(self) -> None:
+        short_url = "https://xhslink.cn/o/2KYMK6MAHx9"
+        desktop_url = (
+            "https://www.xiaohongshu.com/discovery/item/"
+            "6a657da9000000000f02b94a?source=webshare&xhsshare=pc_web"
+            "&xsec_token=desktop-token="
+        )
+        escaped_desktop_url = re.sub(
+            r"([_&=])", r"\\\1", desktop_url
+        )
+        self.assertEqual(
+            python_parse.extract_input_url(
+                f"从离职后，我开始做编程私教 {short_url} "
+                "直达【小红书】看看这篇分享~"
+            ),
+            short_url,
+        )
+        self.assertEqual(
+            python_parse.extract_input_url(f"[{short_url}]({short_url})"),
+            short_url,
+        )
+        self.assertEqual(
+            python_parse.extract_input_url(
+                f"79 【Python一对一教学】 "
+                f"[{escaped_desktop_url}]({escaped_desktop_url})"
+            ),
+            desktop_url,
+        )
+        self.assertEqual(
+            python_parse.extract_input_url(
+                f"先忽略 https://example.com/docs 再打开 {short_url}"
+            ),
+            short_url,
+        )
+        self.assertTrue(python_parse.is_allowed_page_host("xhslink.cn"))
+        self.assertTrue(python_parse.is_allowed_page_host("www.xhslink.cn"))
+        self.assertFalse(
+            python_parse.is_allowed_page_host("xhslink.cn.example.com")
+        )
+        with self.assertRaisesRegex(python_parse.XhsError, "只支持小红书分享链接"):
+            python_parse.extract_input_url(
+                "https://xhslink.cn.example.com/o/fake"
+            )
+        for unsafe_url in (
+            "https://user:password@xhslink.cn/o/fake",
+            "https://xhslink.cn:8443/o/fake",
+        ):
+            with self.assertRaisesRegex(
+                python_parse.XhsError,
+                "只支持小红书分享链接",
+            ):
+                python_parse.extract_input_url(unsafe_url)
+
+        self.assertTrue(python_parse.is_allowed_page_url(short_url))
+        self.assertFalse(
+            python_parse.is_allowed_page_url(
+                "http://www.xiaohongshu.com/discovery/item/"
+                "668d2967000000002500100a"
+            )
+        )
+        redirect_handler = python_parse.SafeRedirectHandler()
+        with self.assertRaisesRegex(
+            python_parse.XhsError,
+            "跳转到了不受支持的地址",
+        ):
+            redirect_handler.redirect_request(
+                python_parse.Request(short_url),
+                None,
+                302,
+                "Found",
+                {},
+                "http://www.xiaohongshu.com/discovery/item/"
+                "668d2967000000002500100a",
+            )
 
     def test_only_target_note_images(self) -> None:
         target_id = "6a68c6d3000000001303f099"

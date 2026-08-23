@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  extractInputUrl,
   extractNoteId,
+  fetchNotePage,
   parseNoteHtml
 } from "../lib/xhs.js";
 
@@ -26,6 +28,110 @@ test("extractNoteId 支持 discovery 和 explore URL", () => {
     extractNoteId("https://www.xiaohongshu.com/explore/1234567890abcdef12345678"),
     "1234567890abcdef12345678"
   );
+});
+
+test("extractInputUrl 自动识别电脑与手机分享，兼容 Markdown 转义", () => {
+  const shortUrl = "https://xhslink.cn/o/2KYMK6MAHx9";
+  const desktopUrl =
+    "https://www.xiaohongshu.com/discovery/item/6a657da9000000000f02b94a" +
+    "?source=webshare&xhsshare=pc_web&xsec_token=desktop-token=";
+  const escapedDesktopUrl = desktopUrl.replace(/([_&=])/g, "\\$1");
+  assert.equal(
+    extractInputUrl(
+      `从离职后，我开始做编程私教 ${shortUrl} 直达【小红书】看看这篇分享~`
+    ),
+    shortUrl
+  );
+  assert.equal(extractInputUrl(`[${shortUrl}](${shortUrl})`), shortUrl);
+  assert.equal(
+    extractInputUrl(`79 【Python一对一教学】 [${escapedDesktopUrl}](${escapedDesktopUrl})`),
+    desktopUrl
+  );
+  assert.equal(
+    extractInputUrl(`先忽略 https://example.com/docs 再打开 ${shortUrl}`),
+    shortUrl
+  );
+});
+
+test("extractInputUrl 拒绝伪造域名、凭证 URL 和非安全端口", () => {
+  assert.throws(
+    () => extractInputUrl("https://xhslink.cn.example.com/o/fake"),
+    /只支持小红书分享链接/
+  );
+  assert.throws(
+    () => extractInputUrl("https://user:password@xhslink.cn/o/fake"),
+    /只支持小红书分享链接/
+  );
+  assert.throws(
+    () => extractInputUrl("https://xhslink.cn:8443/o/fake"),
+    /只支持小红书分享链接/
+  );
+});
+
+test("fetchNotePage 安全跟随手机短链并从最终地址保留 noteId", async () => {
+  const shortUrl = "https://xhslink.cn/o/2KYMK6MAHx9";
+  const finalUrl =
+    "https://www.xiaohongshu.com/discovery/item/668d2967000000002500100a" +
+    "?app_platform=ios&xsec_source=app_share";
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+
+  globalThis.fetch = async (input, options) => {
+    const url = String(input);
+    requests.push({ url, redirect: options?.redirect });
+    if (url === shortUrl) {
+      return new Response(null, {
+        status: 302,
+        headers: { location: finalUrl }
+      });
+    }
+    if (url === finalUrl) {
+      return new Response("<!doctype html><title>手机分享笔记</title>", {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" }
+      });
+    }
+    throw new Error(`未预期的测试请求：${url}`);
+  };
+
+  try {
+    const result = await fetchNotePage(shortUrl);
+    assert.equal(result.finalUrl, finalUrl);
+    assert.equal(extractNoteId(result.finalUrl), "668d2967000000002500100a");
+    assert.match(result.html, /手机分享笔记/);
+    assert.deepEqual(requests, [
+      { url: shortUrl, redirect: "manual" },
+      { url: finalUrl, redirect: "manual" }
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("fetchNotePage 在第二次请求前拦截 HTTP 降级跳转", async () => {
+  const shortUrl = "https://xhslink.cn/o/unsafe";
+  const originalFetch = globalThis.fetch;
+  let requestCount = 0;
+  globalThis.fetch = async () => {
+    requestCount += 1;
+    return new Response(null, {
+      status: 302,
+      headers: {
+        location:
+          "http://www.xiaohongshu.com/discovery/item/668d2967000000002500100a"
+      }
+    });
+  };
+
+  try {
+    await assert.rejects(
+      fetchNotePage(shortUrl),
+      /分享链接跳转到了不受支持的地址/
+    );
+    assert.equal(requestCount, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("只解析 noteDetailMap 中当前帖子的图片，不混入推荐帖子", () => {
