@@ -4,81 +4,155 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="粘贴小红书分享文案，解析并下载无水印原图和视频。" />
-    <meta name="theme-color" content="#ff3158" />
+    <meta name="theme-color" content="#fefcf6" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700;9..144,900&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@700;900&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/style.css" />
     <title>小红书图片与视频下载</title>
   </head>
   <body>
-    <div class="page-shell">
-      <header class="hero">
+    <header class="app-header">
+      <div class="app-header-inner">
         <a class="brand" href="/" aria-label="返回首页">
-          <span class="brand-mark">下</span>
-          <span>媒体下载</span>
+          <span class="brand-mark" aria-hidden="true">↓</span>
+          <span class="brand-copy">
+            <strong>媒体下载</strong>
+            <small>XHS MEDIA SAVER</small>
+          </span>
         </a>
 
-        <div class="hero-copy">
-          <span class="eyebrow">XIAOHONGSHU MEDIA DOWNLOADER</span>
-          <h1>粘贴分享文案，<br /><em>下载图片与视频</em></h1>
-          <p>无需安装 App。可切换 Node.js 或 Python 后台；图片保持原有无水印下载与 ZIP 功能，视频支持清晰度选择和浏览器分段合并下载。</p>
+        <div class="header-status" aria-label="运行状态：文件仅在浏览器本地生成">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span>浏览器本地处理</span>
         </div>
+      </div>
+    </header>
 
-        <form id="parse-form" class="parse-card">
-          <label for="share-text">小红书分享文案或链接</label>
-          <textarea
-            id="share-text"
-            name="shareText"
-            rows="5"
-            maxlength="3000"
-            placeholder="例如：复制这条小红书笔记的完整分享文案并粘贴到这里……"
-            required
-          ></textarea>
-
-          <fieldset class="engine-picker">
-            <legend>后台抓取与下载引擎</legend>
-            <div class="engine-options">
-              <label class="engine-option">
-                <input type="radio" name="engine" value="node" checked />
-                <span>
-                  <strong>Node.js</strong>
-                  <small>默认推荐，启动更快</small>
-                </span>
-              </label>
-              <label class="engine-option">
-                <input type="radio" name="engine" value="python" />
-                <span>
-                  <strong>Python</strong>
-                  <small>独立解析，故障时切换</small>
-                </span>
-              </label>
-            </div>
-            <p id="engine-hint" class="engine-hint">
-              当前使用 Node.js 完成页面抓取、图片代理和视频分段下载。
-            </p>
-          </fieldset>
-
-          <div class="form-actions">
-            <button id="paste-button" class="button button-secondary" type="button">粘贴</button>
-            <button id="parse-button" class="button button-primary" type="submit">
-              <span class="button-text">解析图片与视频</span>
-              <span class="button-loader" aria-hidden="true"></span>
-            </button>
-          </div>
-          <p class="form-hint">仅处理公开可访问的笔记。请只下载你有权保存的内容，并尊重作者版权与平台规则。</p>
-        </form>
-      </header>
-
+    <div class="page-shell">
       <main>
-        <section id="empty-state" class="empty-state">
-          <div class="empty-icon">↘</div>
-          <h2>解析结果会显示在这里</h2>
-          <p>支持图文与视频笔记、小红书短链接、完整链接，以及带文字的整段分享内容。</p>
+        <section class="hero" aria-labelledby="hero-title">
+          <div class="hero-copy">
+            <span class="eyebrow">PRIVATE MEDIA WORKBENCH</span>
+            <h1 id="hero-title">把喜欢的内容，<br /><span class="hl-yellow">干净地保存下来。</span></h1>
+            <p>
+              粘贴一段分享文案，就能解析公开笔记中的原图与视频。无需安装额外 App，下载与打包都在当前浏览器完成。
+            </p>
+
+            <div class="hero-index" aria-label="功能特点">
+              <div class="hero-index-item">
+                <span>01</span>
+                <strong>原图无水印</strong>
+              </div>
+              <div class="hero-index-item">
+                <span>02</span>
+                <strong>视频多清晰度</strong>
+              </div>
+              <div class="hero-index-item">
+                <span>03</span>
+                <strong>Node / Python 双引擎</strong>
+              </div>
+            </div>
+          </div>
+
+          <form id="parse-form" class="parse-card">
+            <div class="panel-heading">
+              <div>
+                <span class="panel-kicker">START HERE</span>
+                <h2>粘贴分享文案</h2>
+              </div>
+              <span class="panel-step" aria-hidden="true">01</span>
+            </div>
+
+            <label class="field-label" for="share-text">小红书分享文案或链接</label>
+            <textarea
+              id="share-text"
+              name="shareText"
+              rows="5"
+              maxlength="3000"
+              placeholder="例如：复制这条小红书笔记的完整分享文案并粘贴到这里……"
+              aria-describedby="engine-hint form-note"
+              required
+            ></textarea>
+
+            <fieldset class="engine-picker">
+              <legend>后台抓取与下载引擎</legend>
+              <div class="engine-options">
+                <label class="engine-option">
+                  <input type="radio" name="engine" value="node" checked />
+                  <span>
+                    <strong>Node.js</strong>
+                    <small>默认推荐 · 启动更快</small>
+                  </span>
+                </label>
+                <label class="engine-option">
+                  <input type="radio" name="engine" value="python" />
+                  <span>
+                    <strong>Python</strong>
+                    <small>独立解析 · 故障时切换</small>
+                  </span>
+                </label>
+              </div>
+              <p id="engine-hint" class="engine-hint">
+                当前使用 Node.js 完成页面抓取、图片代理和视频分段下载。
+              </p>
+            </fieldset>
+
+            <div class="form-actions">
+              <button id="paste-button" class="button button-secondary" type="button">
+                <span aria-hidden="true">⌘</span>
+                粘贴
+              </button>
+              <button id="parse-button" class="button button-primary" type="submit">
+                <span class="button-text">开始解析</span>
+                <span class="button-arrow" aria-hidden="true">↗</span>
+                <span class="button-loader" aria-hidden="true"></span>
+              </button>
+            </div>
+
+            <div id="form-note" class="form-note">
+              <span class="form-note-tag">使用提醒 ✦</span>
+              <p class="form-hint">仅处理公开可访问的笔记。请只下载你有权保存的内容，并尊重作者版权与平台规则。</p>
+            </div>
+          </form>
+        </section>
+
+        <section id="empty-state" class="empty-state" aria-labelledby="empty-title">
+          <div class="empty-state-copy">
+            <span class="empty-index">READY / 00</span>
+            <h2 id="empty-title">内容会在这里展开</h2>
+            <p>支持图文与视频笔记、短链接、完整链接，以及带文字的整段分享内容。</p>
+          </div>
+
+          <div class="system-flow" aria-label="使用流程：粘贴、解析、下载">
+            <div class="flow-step">
+              <span>01</span>
+              <strong>粘贴</strong>
+              <small>分享文案</small>
+            </div>
+            <span class="flow-arrow" aria-hidden="true">→</span>
+            <div class="flow-step">
+              <span>02</span>
+              <strong>解析</strong>
+              <small>公开媒体</small>
+            </div>
+            <span class="flow-arrow" aria-hidden="true">→</span>
+            <div class="flow-step">
+              <span>03</span>
+              <strong>下载</strong>
+              <small>图片 / 视频</small>
+            </div>
+          </div>
         </section>
 
         <section id="result-section" class="result-section" hidden>
           <div class="result-heading">
-            <div>
-              <span class="section-label">解析成功</span>
+            <div class="result-title-block">
+              <span class="section-label">RESULT / 解析成功</span>
               <h2 id="note-title">小红书图片</h2>
               <p id="result-meta">已找到 0 张无水印原图</p>
             </div>
@@ -91,19 +165,20 @@
           </div>
 
           <div id="progress-panel" class="progress-panel" hidden>
-            <div class="progress-copy">
+            <div class="progress-copy" role="status" aria-live="polite" aria-atomic="true">
               <strong id="progress-title">正在下载</strong>
               <span id="progress-text">0 / 0</span>
             </div>
-            <div class="progress-track"><span id="progress-bar"></span></div>
+            <div class="progress-track" aria-hidden="true"><span id="progress-bar"></span></div>
           </div>
 
           <section id="video-section" class="video-section" hidden>
-            <div class="media-section-heading">
-              <div>
-                <span class="section-label">视频下载</span>
-                <h3>选择清晰度后下载</h3>
+            <div class="video-intro">
+              <div class="media-section-heading">
+                <span class="section-label">VIDEO / 视频下载</span>
+                <h3>选好清晰度，<br />直接保存。</h3>
               </div>
+
               <div class="video-actions">
                 <label class="quality-picker">
                   <span>视频清晰度</span>
@@ -112,20 +187,23 @@
                 <button id="download-video-button" class="button button-dark" type="button">下载视频</button>
                 <a id="open-video-link" class="button button-secondary" href="#" target="_blank" rel="noopener noreferrer">打开视频</a>
               </div>
+
+              <p class="video-hint">视频会通过所选后台按小段读取，再在浏览器本地合并为 MP4；不会上传到本站存储。</p>
             </div>
+
             <div class="video-card">
               <video id="video-player" controls playsinline preload="metadata"></video>
               <p id="video-meta">视频信息</p>
             </div>
-            <p class="video-hint">视频会通过所选后台按小段读取，再在浏览器本地合并为 MP4；不会上传到本站存储。</p>
           </section>
 
           <section id="image-section" class="image-section">
             <div class="media-section-heading image-section-heading">
               <div>
-                <span class="section-label">图片下载</span>
+                <span class="section-label">IMAGES / 图片下载</span>
                 <h3>无水印原图</h3>
               </div>
+              <span class="section-aside">勾选后可批量打包为 ZIP</span>
             </div>
             <div id="image-grid" class="image-grid"></div>
           </section>
@@ -133,11 +211,24 @@
       </main>
 
       <footer>
-        <p>图片 ZIP 与视频文件都在你的浏览器中生成，不会上传到本站存储。</p>
+        <div class="footer-brand">
+          <span class="footer-mark" aria-hidden="true">↓</span>
+          <strong>媒体只经过你的浏览器。</strong>
+        </div>
+        <p>图片 ZIP 与视频文件都在本地生成，不会上传到本站存储。</p>
+        <a
+          class="design-credit"
+          href="https://github.com/esthersjw/esther-design-system"
+          target="_blank"
+          rel="noopener noreferrer"
+        >Design system by ESTHER不二 · CC BY-NC-SA 4.0</a>
       </footer>
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <!-- © ESTHER不二 esthersjw/esther-design-system · CC BY-NC-SA 4.0 -->
+    <section class="design-system-signature" aria-hidden="true">esthersjw-design-system</section>
     <script type="module" src="/app.js"></script>
   </body>
 </html>
