@@ -118,7 +118,20 @@ input:focus-visible + span {
   text-decoration: none;
 }
 
-.brand-mark,
+.brand-logo {
+  display: block;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border: 1.5px solid var(--ink);
+  border-radius: 50%;
+  object-fit: cover;
+  background: #fff800;
+  box-shadow: 3px 3px 0 var(--blue);
+  transform: rotate(-2deg);
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
 .footer-mark {
   display: grid;
   place-items: center;
@@ -146,6 +159,7 @@ input:focus-visible + span {
   font-family: var(--font-serif);
   font-size: 15px;
   font-weight: 900;
+  letter-spacing: -0.025em;
   line-height: 1.25;
 }
 
@@ -161,6 +175,11 @@ input:focus-visible + span {
 .brand:hover .brand-copy strong,
 .design-credit:hover {
   background: linear-gradient(transparent 60%, var(--yellow) 60%);
+}
+
+.brand:hover .brand-logo {
+  box-shadow: 4px 4px 0 var(--yellow);
+  transform: translateY(-1px) rotate(0deg);
 }
 
 .app-header-actions {
@@ -1400,7 +1419,7 @@ footer > p {
     width: min(100% - 24px, 1200px);
   }
 
-  .brand-mark {
+  .brand-logo {
     width: 34px;
     height: 34px;
   }
