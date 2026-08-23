@@ -38,6 +38,7 @@ test("只解析 noteDetailMap 中当前帖子的图片，不混入推荐帖子",
           note: {
             noteId: targetId,
             title: "目标帖子",
+            desc: "目标正文\r\n第二行 #目标",
             imageList: makeImageList("target", 7)
           }
         },
@@ -45,6 +46,7 @@ test("只解析 noteDetailMap 中当前帖子的图片，不混入推荐帖子",
           note: {
             noteId: otherId,
             title: "相关推荐",
+            desc: "推荐正文（禁止返回）",
             imageList: makeImageList("other", 15)
           }
         }
@@ -66,6 +68,7 @@ test("只解析 noteDetailMap 中当前帖子的图片，不混入推荐帖子",
 
   assert.equal(parsed.strategy, "exact-initial-state");
   assert.equal(parsed.title, "目标帖子");
+  assert.equal(parsed.content, "目标正文\n第二行 #目标");
   assert.equal(parsed.images.length, 7);
   assert.ok(parsed.images.every((image) => image.token.startsWith("target")));
   assert.ok(parsed.images.every((image) => !image.token.startsWith("other")));
@@ -87,13 +90,15 @@ test("初始状态不可解析时，只取距离当前 noteId 最近的 imageLis
   const targetList = JSON.stringify(makeImageList("local", 4));
   const otherList = JSON.stringify(makeImageList("far", 12));
   const html = `
-    <script>{"noteId":"${targetId}",BROKEN,"imageList":${targetList}}</script>
+    <meta name="description" content="页面描述也不能作为当前文案">
+    <script>{"noteId":"${targetId}","desc":"局部正文不可猜测",BROKEN,"imageList":${targetList}}</script>
     ${"x".repeat(70000)}
     <script>{"noteId":"bbbbbbbbbbbbbbbbbbbbbbbb","imageList":${otherList}}</script>
   `;
 
   const parsed = parseNoteHtml(html, { noteId: targetId });
   assert.equal(parsed.strategy, "note-id-local-image-list");
+  assert.equal(parsed.content, "");
   assert.equal(parsed.images.length, 4);
   assert.ok(parsed.images.every((image) => image.token.startsWith("local")));
 });
@@ -126,6 +131,7 @@ test("只解析当前 noteId 的视频流，不混入推荐帖子视频", () => 
             noteId: targetId,
             type: "video",
             title: "目标视频",
+            desc: "目标视频正文",
             imageList: makeImageList("video-cover", 1),
             video: {
               media: {
@@ -147,6 +153,7 @@ test("只解析当前 noteId 的视频流，不混入推荐帖子视频", () => 
             noteId: otherId,
             type: "video",
             title: "推荐视频",
+            desc: "推荐视频正文（禁止返回）",
             video: {
               media: {
                 stream: {
@@ -165,6 +172,7 @@ test("只解析当前 noteId 的视频流，不混入推荐帖子视频", () => 
 
   assert.equal(parsed.strategy, "exact-initial-state");
   assert.equal(parsed.title, "目标视频");
+  assert.equal(parsed.content, "目标视频正文");
   assert.equal(parsed.images.length, 1);
   assert.equal(parsed.videos.length, 3);
   assert.ok(parsed.videos.every((video) => video.url.includes("target-")));
@@ -205,4 +213,35 @@ test("纯视频笔记即使没有 imageList 也可以解析", () => {
   assert.equal(parsed.images.length, 0);
   assert.equal(parsed.videos.length, 1);
   assert.match(parsed.videos[0].url, /video-only/);
+});
+
+test("当前笔记没有文案时不从推荐内容或页面描述兜底", () => {
+  const targetId = "dddddddddddddddddddddddd";
+  const otherId = "eeeeeeeeeeeeeeeeeeeeeeee";
+  const state = {
+    note: {
+      noteDetailMap: {
+        [targetId]: {
+          note: {
+            noteId: targetId,
+            title: "无正文目标帖",
+            imageList: makeImageList("no-desc", 1)
+          }
+        },
+        [otherId]: {
+          note: {
+            noteId: otherId,
+            desc: "推荐正文（禁止返回）",
+            imageList: makeImageList("recommended-desc", 10)
+          }
+        }
+      }
+    }
+  };
+  const html = `<meta name="description" content="页面描述（禁止返回）">
+    <script>window.__INITIAL_STATE__=${JSON.stringify(state)}</script>`;
+
+  const parsed = parseNoteHtml(html, { noteId: targetId });
+  assert.equal(parsed.strategy, "exact-initial-state");
+  assert.equal(parsed.content, "");
 });

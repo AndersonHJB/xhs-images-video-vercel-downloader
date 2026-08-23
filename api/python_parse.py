@@ -665,6 +665,19 @@ def extract_title_from_note_object(value: Any) -> str:
     return str(title).strip()[:120] if isinstance(title, str) else ""
 
 
+def extract_content_from_note_object(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+
+    # 文案必须和已经锁定的当前笔记对象同源，不能递归扫描相关推荐。
+    for key in ("desc", "description"):
+        content = value.get(key)
+        if not isinstance(content, str) or not content.strip():
+            continue
+        return content.replace("\r\n", "\n").replace("\r", "\n").strip()[:10000]
+    return ""
+
+
 def select_exact_note_from_states(
     page_html: str, note_id: str
 ) -> dict[str, Any] | None:
@@ -681,6 +694,7 @@ def select_exact_note_from_states(
                     "urls": urls,
                     "videos": videos,
                     "title": extract_title_from_note_object(candidate),
+                    "content": extract_content_from_note_object(candidate),
                     "exact_id": object_has_target_id(candidate, note_id),
                 }
             )
@@ -915,6 +929,7 @@ def parse_note_html(page_html: str, note_id: str) -> dict[str, Any]:
     if not note_id:
         return {
             "title": extract_page_title(page_html),
+            "content": "",
             "images": [],
             "videos": [],
             "strategy": "missing-note-id",
@@ -924,6 +939,7 @@ def parse_note_html(page_html: str, note_id: str) -> dict[str, Any]:
     if exact:
         return {
             "title": exact["title"] or extract_page_title(page_html),
+            "content": exact["content"],
             "images": convert_source_urls(exact["urls"])[:50],
             "videos": prepare_video_results(exact["videos"]),
             "strategy": "exact-initial-state",
@@ -936,6 +952,7 @@ def parse_note_html(page_html: str, note_id: str) -> dict[str, Any]:
             "title": (
                 local_images.get("title", "") if local_images else ""
             ) or extract_page_title(page_html),
+            "content": "",
             "images": convert_source_urls(
                 local_images.get("urls", []) if local_images else []
             )[:50],
@@ -953,6 +970,7 @@ def parse_note_html(page_html: str, note_id: str) -> dict[str, Any]:
     primary_video = extract_primary_meta_video(page_html)
     return {
         "title": extract_page_title(page_html),
+        "content": "",
         "images": convert_source_urls([primary_image]) if primary_image else [],
         "videos": prepare_video_results([primary_video]) if primary_video else [],
         "strategy": (
@@ -1082,6 +1100,7 @@ class handler(BaseHTTPRequestHandler):
                         "success": True,
                         "engine": "python",
                         "title": "小红书图片",
+                        "content": "",
                         "type": "image",
                         "count": 1,
                         "videoCount": 0,
@@ -1139,6 +1158,7 @@ class handler(BaseHTTPRequestHandler):
                     "success": True,
                     "engine": "python",
                     "title": parsed["title"],
+                    "content": parsed["content"],
                     "noteId": note_id,
                     "strategy": parsed["strategy"],
                     "type": (

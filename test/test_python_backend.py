@@ -60,6 +60,7 @@ class PythonBackendTests(unittest.TestCase):
                         "note": {
                             "noteId": target_id,
                             "title": "目标帖子",
+                            "desc": "目标正文\r\n第二行 #目标",
                             "imageList": make_image_list("target", 7),
                         }
                     },
@@ -67,6 +68,7 @@ class PythonBackendTests(unittest.TestCase):
                         "note": {
                             "noteId": other_id,
                             "title": "相关推荐",
+                            "desc": "推荐正文（禁止返回）",
                             "imageList": make_image_list("other", 15),
                         }
                     },
@@ -85,6 +87,7 @@ class PythonBackendTests(unittest.TestCase):
         parsed = python_parse.parse_note_html(page_html, target_id)
         self.assertEqual(parsed["strategy"], "exact-initial-state")
         self.assertEqual(parsed["title"], "目标帖子")
+        self.assertEqual(parsed["content"], "目标正文\n第二行 #目标")
         self.assertEqual(len(parsed["images"]), 7)
         self.assertTrue(
             all(image["token"].startswith("target") for image in parsed["images"])
@@ -115,13 +118,16 @@ class PythonBackendTests(unittest.TestCase):
         target_list = json.dumps(make_image_list("local", 4), separators=(",", ":"))
         other_list = json.dumps(make_image_list("far", 12), separators=(",", ":"))
         page_html = (
-            f'<script>{{"noteId":"{target_id}",BROKEN,"imageList":{target_list}}}</script>'
+            '<meta name="description" content="页面描述也不能作为当前文案">'
+            f'<script>{{"noteId":"{target_id}","desc":"局部正文不可猜测",'
+            f'BROKEN,"imageList":{target_list}}}</script>'
             + ("x" * 70000)
             + f'<script>{{"noteId":"bbbbbbbbbbbbbbbbbbbbbbbb","imageList":{other_list}}}</script>'
         )
 
         parsed = python_parse.parse_note_html(page_html, target_id)
         self.assertEqual(parsed["strategy"], "note-id-local-image-list")
+        self.assertEqual(parsed["content"], "")
         self.assertEqual(len(parsed["images"]), 4)
         self.assertTrue(
             all(image["token"].startswith("local") for image in parsed["images"])
@@ -167,6 +173,7 @@ class PythonBackendTests(unittest.TestCase):
                         "note": {
                             "noteId": target_id,
                             "title": "目标视频",
+                            "desc": "目标视频正文",
                             "type": "video",
                             "imageList": make_image_list("video-cover", 1),
                             "video": {
@@ -185,6 +192,7 @@ class PythonBackendTests(unittest.TestCase):
                         "note": {
                             "noteId": other_id,
                             "title": "推荐视频",
+                            "desc": "推荐视频正文（禁止返回）",
                             "video": {
                                 "media": {
                                     "stream": {
@@ -206,6 +214,7 @@ class PythonBackendTests(unittest.TestCase):
 
         self.assertEqual(parsed["strategy"], "exact-initial-state")
         self.assertEqual(parsed["title"], "目标视频")
+        self.assertEqual(parsed["content"], "目标视频正文")
         self.assertEqual(len(parsed["images"]), 1)
         self.assertEqual(len(parsed["videos"]), 2)
         self.assertTrue(
@@ -258,6 +267,40 @@ class PythonBackendTests(unittest.TestCase):
         self.assertEqual(parsed["images"], [])
         self.assertEqual(len(parsed["videos"]), 1)
         self.assertIn("video-only", parsed["videos"][0]["url"])
+
+    def test_missing_target_content_does_not_use_recommendations(self) -> None:
+        target_id = "dddddddddddddddddddddddd"
+        other_id = "eeeeeeeeeeeeeeeeeeeeeeee"
+        state = {
+            "note": {
+                "noteDetailMap": {
+                    target_id: {
+                        "note": {
+                            "noteId": target_id,
+                            "title": "无正文目标帖",
+                            "imageList": make_image_list("no-desc", 1),
+                        }
+                    },
+                    other_id: {
+                        "note": {
+                            "noteId": other_id,
+                            "desc": "推荐正文（禁止返回）",
+                            "imageList": make_image_list("recommended-desc", 10),
+                        }
+                    },
+                }
+            }
+        }
+        page_html = (
+            '<meta name="description" content="页面描述（禁止返回）">'
+            "<script>window.__INITIAL_STATE__="
+            + json.dumps(state, ensure_ascii=False, separators=(",", ":"))
+            + "</script>"
+        )
+
+        parsed = python_parse.parse_note_html(page_html, target_id)
+        self.assertEqual(parsed["strategy"], "exact-initial-state")
+        self.assertEqual(parsed["content"], "")
 
 
 
