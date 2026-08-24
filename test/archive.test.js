@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  estimateStoredZipSize,
   makeNoteTextFileData,
   makeZipBlob
 } from "../lib/archive.js";
@@ -118,10 +119,39 @@ test("ZIP 中央目录、CRC 与本地头一致，中文文件名启用 UTF-8 �
   );
 
   assert.equal(zip.type, "application/zip");
+  assert.equal(zip.size, estimateStoredZipSize([
+    { name: "01.jpg", data: new Uint8Array([1, 2, 3, 4]) },
+    { name: "文案.txt", data: caption }
+  ]));
   const { files, flags, entryCount } = await readStoredZip(zip);
   assert.equal(entryCount, 2);
   assert.deepEqual([...files.keys()], ["01.jpg", "文案.txt"]);
   assert.deepEqual([...files.get("01.jpg")], [1, 2, 3, 4]);
   assert.match(new TextDecoder().decode(files.get("文案.txt")), /示例文案/);
   assert.equal(flags.get("文案.txt") & 0x0800, 0x0800);
+});
+
+test("ZIP 预估包含 UTF-8 文件名开销并拒绝不安全输入", () => {
+  const files = [
+    { name: "01-live.mp4", data: new Uint8Array(7) },
+    { name: "文案.txt", data: new Uint8Array(3) }
+  ];
+  const encodedNameBytes = files.reduce(
+    (total, file) => total + new TextEncoder().encode(file.name).byteLength,
+    0
+  );
+  const dataBytes = files.reduce((total, file) => total + file.data.byteLength, 0);
+
+  assert.equal(
+    estimateStoredZipSize(files),
+    22 + dataBytes + files.length * (30 + 46) + encodedNameBytes * 2
+  );
+  assert.throws(
+    () => makeZipBlob([{ name: "bad.bin", data: new ArrayBuffer(1) }]),
+    { name: "ZipFormatError", message: /Uint8Array/ }
+  );
+  assert.throws(
+    () => estimateStoredZipSize([{ name: "", data: new Uint8Array() }]),
+    { name: "ZipFormatError", message: /文件名不能为空/ }
+  );
 });

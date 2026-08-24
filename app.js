@@ -1,4 +1,8 @@
-import { makeNoteTextFileData, makeZipBlob } from "./lib/archive.js";
+import {
+  estimateStoredZipSize,
+  makeNoteTextFileData,
+  makeZipBlob
+} from "./lib/archive.js";
 import {
   clipboardWriteFailureKind,
   clipboardWriteFailureMessageForKind,
@@ -27,6 +31,13 @@ const MAX_CLIPBOARD_TOTAL_BYTES = 120 * 1024 * 1024;
 const CLIPBOARD_IMAGE_TIMEOUT_MS = 20_000;
 const CLIPBOARD_WRITE_TIMEOUT_MS = 30_000;
 const IMAGE_HEADER_INSPECTION_BYTES = 1024 * 1024;
+const MEBIBYTE = 1024 * 1024;
+// Store ZIP 会同时持有媒体字节与最终 Blob，主动限制归档规模以保护浏览器内存。
+const DESKTOP_ARCHIVE_LIMIT_BYTES = 256 * MEBIBYTE;
+const CONSTRAINED_ARCHIVE_LIMIT_BYTES = 128 * MEBIBYTE;
+const ARCHIVE_OVERHEAD_RESERVE_BYTES = 256 * 1024;
+const ARCHIVE_SIZE_LIMIT_ERROR = "ArchiveSizeLimitError";
+const MAX_VIDEO_DOWNLOAD_BYTES = 512 * MEBIBYTE;
 
 const elements = {
   form: document.querySelector("#parse-form"),
@@ -114,6 +125,135 @@ function sanitizeFilename(value) {
 
 function imageFilename(image) {
   return `${String(image.index).padStart(2, "0")}.jpg`;
+}
+
+function livePhotoVideoFilename(image) {
+  return `${String(image.index).padStart(2, "0")}-live.mp4`;
+}
+
+function livePhotoZipFilename(image) {
+  return `${String(image.index).padStart(2, "0")}-live-photo.zip`;
+}
+
+function livePhotoCount(images = state.images) {
+  return images.filter((image) => image.liveVideo?.url).length;
+}
+
+function declaredVideoSize(video) {
+  const rawSize = video?.size;
+  if (rawSize === undefined || rawSize === null || rawSize === "") return 0;
+  const size = Number(rawSize);
+  if (!Number.isFinite(size) || size < 0) return Number.MAX_SAFE_INTEGER;
+  if (size === 0) return 0;
+  const rounded = Math.ceil(size);
+  return Number.isSafeInteger(rounded) ? rounded : Number.MAX_SAFE_INTEGER;
+}
+
+function archiveLimitProfile() {
+  const userAgent = String(navigator.userAgent || "");
+  const mobileHint = navigator.userAgentData?.mobile === true
+    || /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent)
+    || (/Macintosh/i.test(userAgent) && Number(navigator.maxTouchPoints || 0) > 1);
+  const deviceMemory = Number(navigator.deviceMemory || 0);
+  const lowMemory = Number.isFinite(deviceMemory) && deviceMemory > 0 && deviceMemory <= 4;
+  const constrained = mobileHint || lowMemory;
+
+  return {
+    constrained,
+    label: constrained ? "移动端或低内存设备" : "桌面端",
+    limitBytes: constrained
+      ? CONSTRAINED_ARCHIVE_LIMIT_BYTES
+      : DESKTOP_ARCHIVE_LIMIT_BYTES
+  };
+}
+
+function isArchiveSizeLimitError(error) {
+  return error?.name === ARCHIVE_SIZE_LIMIT_ERROR;
+}
+
+function createArchiveBudget(kind) {
+  const profile = archiveLimitProfile();
+  const payloadLimitBytes = profile.limitBytes - ARCHIVE_OVERHEAD_RESERVE_BYTES;
+  const subject = kind === "batch" ? "所选媒体" : "这张实况图片";
+  const advice = kind === "batch"
+    ? "请减少勾选数量或分批下载。"
+    : "请在内存更充足的桌面浏览器中重试，或只下载原图 / 实况 MP4。";
+  let committedBytes = 0;
+
+  function limitError(label, attemptedBytes = 0) {
+    const attempted = Number(attemptedBytes);
+    const normalizedAttempt = Number.isFinite(attempted)
+      ? Math.max(0, attempted)
+      : 0;
+    const projectedBytes = committedBytes
+      + normalizedAttempt
+      + ARCHIVE_OVERHEAD_RESERVE_BYTES;
+    const projected = normalizedAttempt > 0
+      ? `预计归档至少需要 ${formatBytes(projectedBytes)}，`
+      : "";
+    const error = new Error(
+      `${label || subject}${projected}超过当前${profile.label} ${formatBytes(profile.limitBytes)} 的浏览器归档上限。${advice}`
+    );
+    error.name = ARCHIVE_SIZE_LIMIT_ERROR;
+    error.limitBytes = profile.limitBytes;
+    return error;
+  }
+
+  function assertFits(byteLength, label) {
+    const bytes = Number(byteLength ?? 0);
+    if (!Number.isSafeInteger(bytes) || bytes < 0) throw limitError(label);
+    if (committedBytes + bytes > payloadLimitBytes) {
+      throw limitError(label, bytes);
+    }
+  }
+
+  function remainingBytes(label) {
+    const remaining = payloadLimitBytes - committedBytes;
+    if (remaining <= 0) throw limitError(label);
+    return remaining;
+  }
+
+  async function consumeBlob(blob, label) {
+    assertFits(blob.size, label);
+    const buffer = await blob.arrayBuffer();
+    assertFits(buffer.byteLength, label);
+    committedBytes += buffer.byteLength;
+    return new Uint8Array(buffer);
+  }
+
+  function consumeData(data, label) {
+    if (!(data instanceof Uint8Array)) throw limitError(label);
+    assertFits(data.byteLength, label);
+    committedBytes += data.byteLength;
+    return data;
+  }
+
+  function assertFilesFit(files) {
+    const estimatedSize = estimateStoredZipSize(files);
+    if (estimatedSize > profile.limitBytes) {
+      throw limitError(
+        `${subject}生成的 ZIP`,
+        Math.max(0, estimatedSize - committedBytes)
+      );
+    }
+    return estimatedSize;
+  }
+
+  function assertFinalZip(blob, expectedSize) {
+    if (blob.size > profile.limitBytes || blob.size !== expectedSize) {
+      throw limitError(`${subject}生成的 ZIP`);
+    }
+  }
+
+  return {
+    assertFilesFit,
+    assertFinalZip,
+    assertFits,
+    consumeBlob,
+    consumeData,
+    limitErrorFactory: (label) => () => limitError(label),
+    remainingBytes
+  };
 }
 
 function extractSourceUrl(text) {
@@ -229,8 +369,8 @@ function updateEngineUI() {
   }
 
   elements.engineHint.textContent = state.engine === "python"
-    ? "当前使用 Python 完成页面抓取、图片代理和视频分段下载。"
-    : "当前使用 Node.js 完成页面抓取、图片代理和视频分段下载。";
+    ? "当前使用 Python 完成页面抓取、图片代理和媒体分段下载。"
+    : "当前使用 Node.js 完成页面抓取、图片代理和媒体分段下载。";
 }
 
 function updateResultMeta() {
@@ -238,6 +378,8 @@ function updateResultMeta() {
   const strategy = state.strategy ? ` · ${state.strategy}` : "";
   const parts = [];
   if (state.images.length) parts.push(`${state.images.length} 张无水印原图`);
+  const liveCount = livePhotoCount();
+  if (liveCount) parts.push(`${liveCount} 张实况图片`);
   if (state.videos.length) parts.push(`${state.videos.length} 个视频清晰度`);
   elements.resultMeta.textContent =
     `已找到 ${parts.join("、")} · ${engineLabel(state.parseEngine)} 引擎${strategy}`;
@@ -254,13 +396,12 @@ function proxyUrl(image) {
   return `${endpoint}?${params.toString()}`;
 }
 
-function setProgress(current, total, title = "正在下载并打包") {
+function setProgress(current, total, title = "正在下载并打包", detail = "") {
   elements.progressPanel.hidden = false;
   elements.progressTitle.textContent = title;
-  elements.progressText.textContent = `${current} / ${total}`;
-  elements.progressBar.style.width = `${
-    total ? Math.round((current / total) * 100) : 0
-  }%`;
+  elements.progressText.textContent = detail || `${current} / ${total}`;
+  const ratio = total ? Math.max(0, Math.min(1, current / total)) : 0;
+  elements.progressBar.style.width = `${Math.round(ratio * 100)}%`;
 }
 
 function hideProgress() {
@@ -288,23 +429,36 @@ async function readApiError(response) {
   }
 }
 
-async function responseBlobWithLimit(response, maxBytes = 0) {
+function imageTooLargeError() {
+  const error = new Error("单张原图超过 30 MB，请改用下载原图或 ZIP。");
+  error.name = "ImageTooLargeError";
+  return error;
+}
+
+function responseSizeLimitError(limitErrorFactory) {
+  return typeof limitErrorFactory === "function"
+    ? limitErrorFactory()
+    : imageTooLargeError();
+}
+
+async function responseBlobWithLimit(
+  response,
+  maxBytes = 0,
+  limitErrorFactory = null
+) {
   const contentType = response.headers.get("content-type") || "";
   if (!maxBytes) return response.blob();
 
   const contentLength = Number(response.headers.get("content-length") || 0);
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-    const error = new Error("单张原图超过 30 MB，请改用下载原图或 ZIP。");
-    error.name = "ImageTooLargeError";
-    throw error;
+    await response.body?.cancel().catch(() => {});
+    throw responseSizeLimitError(limitErrorFactory);
   }
 
   if (!response.body?.getReader) {
     const blob = await response.blob();
     if (blob.size > maxBytes) {
-      const error = new Error("单张原图超过 30 MB，请改用下载原图或 ZIP。");
-      error.name = "ImageTooLargeError";
-      throw error;
+      throw responseSizeLimitError(limitErrorFactory);
     }
     return blob;
   }
@@ -320,9 +474,7 @@ async function responseBlobWithLimit(response, maxBytes = 0) {
       totalBytes += value.byteLength;
       if (totalBytes > maxBytes) {
         await reader.cancel().catch(() => {});
-        const error = new Error("单张原图超过 30 MB，请改用下载原图或 ZIP。");
-        error.name = "ImageTooLargeError";
-        throw error;
+        throw responseSizeLimitError(limitErrorFactory);
       }
       chunks.push(value);
     }
@@ -334,10 +486,15 @@ async function responseBlobWithLimit(response, maxBytes = 0) {
   return new Blob(chunks, { type: contentType });
 }
 
-async function fetchImageBlob(image, { signal, maxBytes = 0 } = {}) {
+async function fetchImageBlob(
+  image,
+  { signal, maxBytes = 0, limitErrorFactory = null } = {}
+) {
   const response = await fetch(proxyUrl(image), { signal });
 
-  if (response.ok) return responseBlobWithLimit(response, maxBytes);
+  if (response.ok) {
+    return responseBlobWithLimit(response, maxBytes, limitErrorFactory);
+  }
 
   if (response.status === 413) {
     try {
@@ -347,10 +504,19 @@ async function fetchImageBlob(image, { signal, maxBytes = 0 } = {}) {
         signal
       });
       if (directResponse.ok) {
-        return responseBlobWithLimit(directResponse, maxBytes);
+        return responseBlobWithLimit(
+          directResponse,
+          maxBytes,
+          limitErrorFactory
+        );
       }
     } catch (error) {
-      if (["AbortError", "ImageTooLargeError"].includes(error?.name)) throw error;
+      if (
+        ["AbortError", "ImageTooLargeError"].includes(error?.name)
+        || isArchiveSizeLimitError(error)
+      ) {
+        throw error;
+      }
       // 继续抛出更明确的提示。
     }
 
@@ -947,59 +1113,341 @@ async function getVideoMeta(sourceUrl, fallbackSize = 0) {
   if (!response.ok) throw new Error(await readVideoApiError(response));
   const meta = await response.json();
   const size = Number(meta.size || fallbackSize || 0);
-  if (!size) throw new Error("无法确定视频大小，不能安全执行分段下载。");
+  if (!Number.isSafeInteger(size) || size <= 0) {
+    throw new Error("无法确定安全的视频大小，不能执行分段下载。");
+  }
+  const requestedChunkSize = Number(meta.chunkSize || 3_500_000);
+  if (!Number.isSafeInteger(requestedChunkSize) || requestedChunkSize <= 0) {
+    throw new Error("视频分段大小无效，已停止下载。");
+  }
   return {
     size,
     contentType: meta.contentType || "video/mp4",
-    chunkSize: Math.min(Number(meta.chunkSize || 3_500_000), 3_500_000)
+    chunkSize: Math.min(requestedChunkSize, 3_500_000)
   };
 }
 
-async function downloadVideoByChunks(sourceUrl, video) {
-  const meta = await getVideoMeta(sourceUrl, video.size);
-  const chunks = [];
-  const totalChunks = Math.ceil(meta.size / meta.chunkSize);
-
-  for (let index = 0; index < totalChunks; index += 1) {
-    const start = index * meta.chunkSize;
-    const end = Math.min(meta.size - 1, start + meta.chunkSize - 1);
-    setProgress(
-      index,
-      totalChunks,
-      `正在分段下载视频 ${formatBytes(start)} / ${formatBytes(meta.size)}`
-    );
-
-    const response = await fetch(
-      videoApiUrl("chunk", sourceUrl, {
-        start: String(start),
-        end: String(end)
-      })
-    );
-    if (!response.ok) throw new Error(await readVideoApiError(response));
-
-    const buffer = await response.arrayBuffer();
-    const expected = end - start + 1;
-    if (buffer.byteLength !== expected && end !== meta.size - 1) {
-      throw new Error(`视频第 ${index + 1} 段长度异常。`);
-    }
-    chunks.push(new Uint8Array(buffer));
-    setProgress(
-      index + 1,
-      totalChunks,
-      `正在分段下载视频 ${formatBytes(Math.min(meta.size, end + 1))} / ${formatBytes(meta.size)}`
-    );
-  }
-
-  return new Blob(chunks, { type: meta.contentType || "video/mp4" });
+function videoTooLargeError(maxBytes, label = "视频") {
+  const error = new Error(
+    `${label}超过当前 ${formatBytes(maxBytes)} 的安全读取上限。`
+  );
+  error.name = "VideoTooLargeError";
+  return error;
 }
 
-async function tryDirectVideoDownload(sourceUrl) {
+function videoSizeLimitError(limitErrorFactory, maxBytes) {
+  return typeof limitErrorFactory === "function"
+    ? limitErrorFactory()
+    : videoTooLargeError(maxBytes);
+}
+
+function assertVideoSizeWithinLimit(byteLength, maxBytes, limitErrorFactory) {
+  if (!maxBytes) return;
+  const bytes = Number(byteLength ?? 0);
+  if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > maxBytes) {
+    throw videoSizeLimitError(limitErrorFactory, maxBytes);
+  }
+}
+
+async function downloadVideoByChunks(
+  sourceUrl,
+  video,
+  { onProgress, maxBytes = 0, limitErrorFactory = null } = {}
+) {
+  assertVideoSizeWithinLimit(
+    declaredVideoSize(video),
+    maxBytes,
+    limitErrorFactory
+  );
+  const meta = await getVideoMeta(sourceUrl, video.size);
+  assertVideoSizeWithinLimit(meta.size, maxBytes, limitErrorFactory);
+  const chunks = [];
+  const totalChunks = Math.ceil(meta.size / meta.chunkSize);
+  let receivedBytes = 0;
+
+  const reportProgress = (loadedBytes, chunkIndex) => {
+    if (typeof onProgress === "function") {
+      onProgress({
+        loadedBytes,
+        totalBytes: meta.size,
+        chunkIndex,
+        totalChunks
+      });
+      return;
+    }
+    setProgress(
+      chunkIndex,
+      totalChunks,
+      `正在分段下载视频 ${formatBytes(loadedBytes)} / ${formatBytes(meta.size)}`
+    );
+  };
+
+  try {
+    for (let index = 0; index < totalChunks; index += 1) {
+      const start = index * meta.chunkSize;
+      const end = Math.min(meta.size - 1, start + meta.chunkSize - 1);
+      const expected = end - start + 1;
+      reportProgress(start, index);
+
+      const response = await fetch(
+        videoApiUrl("chunk", sourceUrl, {
+          start: String(start),
+          end: String(end)
+        })
+      );
+      if (!response.ok) throw new Error(await readVideoApiError(response));
+
+      const declaredChunkLength = Number(
+        response.headers.get("content-length") || 0
+      );
+      if (
+        Number.isFinite(declaredChunkLength)
+        && declaredChunkLength > 0
+        && declaredChunkLength !== expected
+      ) {
+        await response.body?.cancel().catch(() => {});
+        throw new Error(`视频第 ${index + 1} 段声明长度异常。`);
+      }
+
+      const buffer = await response.arrayBuffer();
+      if (buffer.byteLength !== expected) {
+        throw new Error(`视频第 ${index + 1} 段长度异常。`);
+      }
+      receivedBytes += buffer.byteLength;
+      assertVideoSizeWithinLimit(
+        receivedBytes,
+        maxBytes,
+        limitErrorFactory
+      );
+      chunks.push(new Uint8Array(buffer));
+      reportProgress(Math.min(meta.size, end + 1), index + 1);
+    }
+  } catch (error) {
+    // 当前线路失败后先释放分段引用，再由上层尝试备用 CDN 或直连。
+    chunks.length = 0;
+    throw error;
+  }
+
+  const blob = new Blob(chunks, { type: meta.contentType || "video/mp4" });
+  if (blob.size !== meta.size) {
+    throw new Error("视频合并后的长度与元数据不一致。");
+  }
+  assertVideoSizeWithinLimit(blob.size, maxBytes, limitErrorFactory);
+  return blob;
+}
+
+async function tryDirectVideoDownload(
+  sourceUrl,
+  { maxBytes = 0, limitErrorFactory = null } = {}
+) {
   const response = await fetch(sourceUrl, {
     mode: "cors",
     referrerPolicy: "no-referrer"
   });
   if (!response.ok) throw new Error(`视频 CDN 返回 HTTP ${response.status}`);
-  return response.blob();
+  const factory = limitErrorFactory
+    || (maxBytes ? () => videoTooLargeError(maxBytes) : null);
+  const blob = await responseBlobWithLimit(response, maxBytes, factory);
+  assertVideoSizeWithinLimit(blob.size, maxBytes, factory);
+  return blob;
+}
+
+async function fetchVideoBlobWithFallback(video, options = {}) {
+  const { maxBytes = 0, limitErrorFactory = null } = options;
+  assertVideoSizeWithinLimit(
+    declaredVideoSize(video),
+    maxBytes,
+    limitErrorFactory
+  );
+  const candidates = [
+    ...new Set([video.url, ...(video.backupUrls || [])].filter(Boolean))
+  ];
+  let lastError = null;
+
+  for (const sourceUrl of candidates) {
+    try {
+      return await downloadVideoByChunks(sourceUrl, video, options);
+    } catch (error) {
+      if (isArchiveSizeLimitError(error) || error?.name === "VideoTooLargeError") {
+        throw error;
+      }
+      lastError = error;
+    }
+  }
+
+  for (const sourceUrl of candidates) {
+    try {
+      return await tryDirectVideoDownload(sourceUrl, {
+        maxBytes,
+        limitErrorFactory
+      });
+    } catch (error) {
+      if (isArchiveSizeLimitError(error) || error?.name === "VideoTooLargeError") {
+        throw error;
+      }
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error("实况动态片段下载失败。");
+}
+
+function preflightLiveArchive(images, archiveBudget, label) {
+  const declaredBytes = images.reduce(
+    (total, image) => total + declaredVideoSize(image.liveVideo),
+    0
+  );
+  if (!Number.isSafeInteger(declaredBytes)) {
+    throw archiveBudget.limitErrorFactory(label)();
+  }
+  if (declaredBytes > 0) archiveBudget.assertFits(declaredBytes, label);
+}
+
+async function fetchImageArchiveData(image, archiveBudget, label) {
+  const limitErrorFactory = archiveBudget.limitErrorFactory(label);
+  const blob = await fetchImageBlob(image, {
+    maxBytes: archiveBudget.remainingBytes(label),
+    limitErrorFactory
+  });
+  return archiveBudget.consumeBlob(blob, label);
+}
+
+async function fetchVideoArchiveData(
+  video,
+  archiveBudget,
+  label,
+  onProgress
+) {
+  const limitErrorFactory = archiveBudget.limitErrorFactory(label);
+  const blob = await fetchVideoBlobWithFallback(video, {
+    maxBytes: archiveBudget.remainingBytes(label),
+    limitErrorFactory,
+    onProgress
+  });
+  return archiveBudget.consumeBlob(blob, label);
+}
+
+function setLiveDownloadBusy(isBusy, trigger) {
+  state.busy = isBusy;
+  if (isBusy) trigger?.setAttribute("aria-busy", "true");
+  else trigger?.removeAttribute("aria-busy");
+  elements.parseButton.disabled = isBusy;
+  elements.videoQuality.disabled = isBusy;
+  elements.downloadVideoButton.disabled = isBusy;
+  for (const input of elements.engineInputs) input.disabled = isBusy;
+  updateSelectionUI();
+}
+
+async function downloadLivePhoto(image, trigger) {
+  if (state.busy || !image.liveVideo?.url) return;
+
+  const archiveBudget = createArchiveBudget("single");
+  try {
+    preflightLiveArchive(
+      [image],
+      archiveBudget,
+      `第 ${image.index} 张实况动态片段`
+    );
+  } catch (error) {
+    showToast(error.message, "error", 7200);
+    return;
+  }
+
+  setLiveDownloadBusy(true, trigger);
+  try {
+    setProgress(0, 2, `正在准备第 ${image.index} 张实况图片`);
+    const imageData = await fetchImageArchiveData(
+      image,
+      archiveBudget,
+      `第 ${image.index} 张原图`
+    );
+    setProgress(1, 2, `正在下载第 ${image.index} 张实况动态片段`);
+    const liveVideoData = await fetchVideoArchiveData(
+      image.liveVideo,
+      archiveBudget,
+      `第 ${image.index} 张实况动态片段`,
+      ({ loadedBytes, totalBytes }) => {
+        const ratio = totalBytes ? loadedBytes / totalBytes : 0;
+        setProgress(
+          1 + ratio,
+          2,
+          `正在下载第 ${image.index} 张实况动态片段`,
+          `${loadedBytes ? formatBytes(loadedBytes) : "0 B"} / ${formatBytes(totalBytes)}`
+        );
+      }
+    );
+    const files = [
+      { name: imageFilename(image), data: imageData },
+      { name: livePhotoVideoFilename(image), data: liveVideoData }
+    ];
+    const expectedSize = archiveBudget.assertFilesFit(files);
+    const zipBlob = makeZipBlob(files);
+    archiveBudget.assertFinalZip(zipBlob, expectedSize);
+    triggerBlobDownload(zipBlob, livePhotoZipFilename(image));
+    showToast(
+      `第 ${image.index} 张实况图片已打包为 JPG + MP4 并开始保存`,
+      "success"
+    );
+  } catch (error) {
+    showToast(
+      `第 ${image.index} 张实况图片下载失败：${error.message}`,
+      "error",
+      isArchiveSizeLimitError(error) ? 7200 : 6200
+    );
+  } finally {
+    setLiveDownloadBusy(false, trigger);
+    hideProgress();
+    trigger?.focus({ preventScroll: true });
+  }
+}
+
+async function downloadLiveVideo(image, trigger) {
+  if (state.busy || !image.liveVideo?.url) return;
+
+  const profile = archiveLimitProfile();
+  const limitErrorFactory = () => videoTooLargeError(
+    profile.limitBytes,
+    `第 ${image.index} 张实况视频`
+  );
+  try {
+    assertVideoSizeWithinLimit(
+      declaredVideoSize(image.liveVideo),
+      profile.limitBytes,
+      limitErrorFactory
+    );
+  } catch (error) {
+    showToast(`${error.message} 请在桌面端重试。`, "error", 7200);
+    return;
+  }
+
+  setLiveDownloadBusy(true, trigger);
+  try {
+    setProgress(0, 1, `正在下载第 ${image.index} 张实况 MP4`);
+    const blob = await fetchVideoBlobWithFallback(image.liveVideo, {
+      maxBytes: profile.limitBytes,
+      limitErrorFactory,
+      onProgress: ({ loadedBytes, totalBytes }) => {
+        setProgress(
+          loadedBytes,
+          totalBytes,
+          `正在下载第 ${image.index} 张实况 MP4`,
+          `${loadedBytes ? formatBytes(loadedBytes) : "0 B"} / ${formatBytes(totalBytes)}`
+        );
+      }
+    });
+    triggerBlobDownload(blob, livePhotoVideoFilename(image));
+    showToast(`第 ${image.index} 张实况 MP4 已开始保存`, "success");
+  } catch (error) {
+    showToast(
+      `第 ${image.index} 张实况 MP4 下载失败：${error.message}`,
+      "error",
+      6200
+    );
+  } finally {
+    setLiveDownloadBusy(false, trigger);
+    hideProgress();
+    trigger?.focus({ preventScroll: true });
+  }
 }
 
 async function downloadCurrentVideo() {
@@ -1022,29 +1470,39 @@ async function downloadCurrentVideo() {
   elements.downloadZipButton.disabled = true;
   for (const input of elements.engineInputs) input.disabled = true;
 
-  const candidates = [video.url, ...(video.backupUrls || [])].filter(Boolean);
+  const candidates = [
+    ...new Set([video.url, ...(video.backupUrls || [])].filter(Boolean))
+  ];
   let lastError = null;
 
   try {
     for (const sourceUrl of candidates) {
       try {
-        const blob = await downloadVideoByChunks(sourceUrl, video);
+        const blob = await downloadVideoByChunks(sourceUrl, video, {
+          maxBytes: MAX_VIDEO_DOWNLOAD_BYTES
+        });
         triggerBlobDownload(blob, videoFilename());
         showToast("视频已经合并完成并开始保存", "success");
         return;
       } catch (error) {
+        if (error?.name === "VideoTooLargeError") throw error;
         lastError = error;
       }
     }
 
     // CDN 不支持 Range 或分段接口受限时，再尝试浏览器直连。
-    try {
-      const blob = await tryDirectVideoDownload(video.url);
-      triggerBlobDownload(blob, videoFilename());
-      showToast("视频已通过浏览器直连开始保存", "success");
-      return;
-    } catch (error) {
-      lastError = error;
+    for (const sourceUrl of candidates) {
+      try {
+        const blob = await tryDirectVideoDownload(sourceUrl, {
+          maxBytes: MAX_VIDEO_DOWNLOAD_BYTES
+        });
+        triggerBlobDownload(blob, videoFilename());
+        showToast("视频已通过浏览器直连开始保存", "success");
+        return;
+      } catch (error) {
+        if (error?.name === "VideoTooLargeError") throw error;
+        lastError = error;
+      }
     }
 
     window.open(video.url, "_blank", "noopener,noreferrer");
@@ -1052,7 +1510,16 @@ async function downloadCurrentVideo() {
       `${lastError?.message || "自动下载失败"}，已打开视频原地址，可在新页面中保存。`
     );
   } catch (error) {
-    showToast(error.message, "error");
+    if (error?.name === "VideoTooLargeError") {
+      window.open(video.url, "_blank", "noopener,noreferrer");
+      showToast(
+        `${error.message} 已尝试打开视频原地址；若新页面被拦截，请点击“打开原地址”。`,
+        "error",
+        7200
+      );
+    } else {
+      showToast(error.message, "error");
+    }
   } finally {
     state.busy = false;
     elements.downloadVideoButton.disabled = false;
@@ -1089,17 +1556,20 @@ function updateSelectionUI() {
   const firstSelectedImage = state.images.find((image) =>
     state.selected.has(image.index)
   );
+  const selectedLiveCount = state.images.filter(
+    (image) => state.selected.has(image.index) && image.liveVideo?.url
+  ).length;
   const multipleItemsBlocked =
     state.multipleClipboardItemsSupported === false && selectedCount > 1;
   elements.selectAllButton.textContent = allSelected ? "取消全选" : "全部选择";
   elements.copySelectedImagesButton.textContent = multipleItemsBlocked
     ? `多图复制受限（${selectedCount}）`
-    : `复制图片（${selectedCount}）`;
+    : `复制静态图（${selectedCount}）`;
   elements.copySelectedImagesButton.setAttribute(
     "aria-label",
     multipleItemsBlocked
       ? `当前浏览器不支持一次复制 ${selectedCount} 张独立图片`
-      : `复制所选图片（${selectedCount} 张）`
+      : `复制所选静态图片（${selectedCount} 张）`
   );
   elements.copySelectedImagesButton.setAttribute(
     "aria-describedby",
@@ -1107,8 +1577,10 @@ function updateSelectionUI() {
       ? "clipboard-fallback-title clipboard-hint"
       : "clipboard-hint"
   );
-  elements.copyLinksButton.textContent = `复制链接（${selectedCount}）`;
-  elements.downloadZipButton.textContent = `下载 ZIP（${selectedCount}）`;
+  elements.copyLinksButton.textContent = `复制原图链接（${selectedCount}）`;
+  elements.downloadZipButton.textContent = selectedLiveCount
+    ? `下载 ZIP（${selectedCount} 张 · ${selectedLiveCount} 实况）`
+    : `下载 ZIP（${selectedCount} 张）`;
   elements.selectAllButton.disabled = state.busy || state.images.length === 0;
   elements.copySelectedImagesButton.disabled =
     state.busy || noSelection || multipleItemsBlocked;
@@ -1144,8 +1616,10 @@ function renderResults() {
   elements.imageGrid.replaceChildren();
 
   for (const image of state.images) {
+    const hasLiveVideo = Boolean(image.liveVideo?.url);
+    const isLivePhoto = Boolean(image.livePhoto || hasLiveVideo);
     const card = document.createElement("article");
-    card.className = "image-card";
+    card.className = `image-card${isLivePhoto ? " is-live-photo" : ""}`;
     card.innerHTML = `
       <label class="select-control" title="选择第 ${image.index} 张图片">
         <input type="checkbox" data-index="${image.index}" checked />
@@ -1153,9 +1627,19 @@ function renderResults() {
       </label>
       <div class="image-frame">
         <img src="${image.url}" alt="第 ${image.index} 张原图预览" loading="lazy" referrerpolicy="no-referrer" />
+        ${isLivePhoto ? `
+          <span class="live-photo-badge${hasLiveVideo ? "" : " is-unavailable"}">
+            <span aria-hidden="true">●</span>
+            ${hasLiveVideo ? "实况" : "实况源暂不可用"}
+          </span>
+        ` : ""}
         <span class="image-number">${String(image.index).padStart(2, "0")}</span>
       </div>
       <div class="image-card-actions">
+        ${hasLiveVideo ? `
+          <button class="card-button card-button-live download-live-photo" type="button" aria-label="下载第 ${image.index} 张实况图片的 JPG 与 MP4 素材 ZIP">下载实况 ZIP</button>
+          <button class="card-button card-button-live-video download-live-video" type="button" aria-label="单独下载第 ${image.index} 张实况视频 MP4">下载实况 MP4</button>
+        ` : ""}
         <button class="card-button download-one" type="button">下载原图</button>
         <button class="card-button card-button-copy copy-image" type="button" aria-label="复制第 ${image.index} 张图片">复制图片</button>
         <a class="card-button card-button-muted" href="${image.url}" target="_blank" rel="noopener noreferrer">打开原图</a>
@@ -1174,6 +1658,14 @@ function renderResults() {
     card
       .querySelector(".download-one")
       .addEventListener("click", () => downloadSingle(image));
+    const livePhotoButton = card.querySelector(".download-live-photo");
+    livePhotoButton?.addEventListener("click", () =>
+      downloadLivePhoto(image, livePhotoButton)
+    );
+    const liveVideoButton = card.querySelector(".download-live-video");
+    liveVideoButton?.addEventListener("click", () =>
+      downloadLiveVideo(image, liveVideoButton)
+    );
     const copyButton = card.querySelector(".copy-image");
     copyButton.addEventListener("click", () => copyImages([image], copyButton));
     elements.imageGrid.append(card);
@@ -1216,6 +1708,18 @@ async function downloadSelectedZip() {
     return;
   }
 
+  const archiveBudget = createArchiveBudget("batch");
+  try {
+    preflightLiveArchive(
+      selectedImages,
+      archiveBudget,
+      "所选实况动态片段"
+    );
+  } catch (error) {
+    showToast(error.message, "error", 7200);
+    return;
+  }
+
   state.busy = true;
   elements.downloadZipButton.disabled = true;
   elements.selectAllButton.disabled = true;
@@ -1229,58 +1733,139 @@ async function downloadSelectedZip() {
   updateSelectionUI();
   const files = [];
   const failures = [];
+  let completedAssets = 0;
+  let downloadedImages = 0;
+  let downloadedLiveVideos = 0;
+  const totalAssets = selectedImages.length + livePhotoCount(selectedImages);
+
+  const reportAssetProgress = (title, fraction = 0, detail = "") => {
+    setProgress(
+      completedAssets + fraction,
+      totalAssets,
+      title,
+      detail || `${completedAssets} / ${totalAssets} 个媒体文件`
+    );
+  };
 
   try {
-    setProgress(0, selectedImages.length);
+    reportAssetProgress("正在下载并打包图片与实况素材");
 
-    for (let offset = 0; offset < selectedImages.length; offset += 1) {
-      const image = selectedImages[offset];
-      setProgress(
-        offset,
-        selectedImages.length,
-        `正在下载第 ${image.index} 张原图`
-      );
+    for (const image of selectedImages) {
+      reportAssetProgress(`正在下载第 ${image.index} 张原图`);
+      let imageDownloaded = false;
 
       try {
-        const blob = await fetchImageBlob(image);
         files.push({
           name: imageFilename(image),
-          data: new Uint8Array(await blob.arrayBuffer())
+          data: await fetchImageArchiveData(
+            image,
+            archiveBudget,
+            `第 ${image.index} 张原图`
+          )
         });
+        imageDownloaded = true;
+        downloadedImages += 1;
       } catch (error) {
-        failures.push({ image, message: error.message });
+        if (isArchiveSizeLimitError(error)) throw error;
+        failures.push({ kind: "image", image, message: error.message });
+      } finally {
+        completedAssets += 1;
       }
 
-      setProgress(offset + 1, selectedImages.length);
+      if (image.liveVideo?.url) {
+        if (!imageDownloaded) {
+          failures.push({
+            kind: "live",
+            image,
+            message: "配对原图下载失败，未加入孤立的实况 MP4。"
+          });
+          completedAssets += 1;
+          reportAssetProgress("正在整理已下载的媒体文件");
+          continue;
+        }
+
+        reportAssetProgress(`正在下载第 ${image.index} 张实况动态片段`);
+        try {
+          const data = await fetchVideoArchiveData(
+            image.liveVideo,
+            archiveBudget,
+            `第 ${image.index} 张实况动态片段`,
+            ({ loadedBytes, totalBytes }) => {
+              const ratio = totalBytes ? loadedBytes / totalBytes : 0;
+              reportAssetProgress(
+                `正在下载第 ${image.index} 张实况动态片段`,
+                ratio,
+                `${completedAssets + 1} / ${totalAssets} · ${
+                  loadedBytes ? formatBytes(loadedBytes) : "0 B"
+                } / ${formatBytes(totalBytes)}`
+              );
+            }
+          );
+          files.push({
+            name: livePhotoVideoFilename(image),
+            data
+          });
+          downloadedLiveVideos += 1;
+        } catch (error) {
+          if (isArchiveSizeLimitError(error)) throw error;
+          failures.push({ kind: "live", image, message: error.message });
+        } finally {
+          completedAssets += 1;
+        }
+      }
+
+      reportAssetProgress("正在整理已下载的媒体文件");
     }
 
     if (files.length === 0) {
       throw new Error(failures[0]?.message || "所有图片均下载失败。");
     }
 
+    const noteData = archiveBudget.consumeData(
+      noteTextFileData(),
+      "文案 TXT"
+    );
     files.push({
       name: "文案.txt",
-      data: noteTextFileData()
+      data: noteData
     });
 
     setProgress(
-      selectedImages.length,
-      selectedImages.length,
+      totalAssets,
+      totalAssets,
       "正在浏览器中生成 ZIP 文件"
     );
+    const expectedSize = archiveBudget.assertFilesFit(files);
     const zipBlob = makeZipBlob(files);
+    archiveBudget.assertFinalZip(zipBlob, expectedSize);
     triggerBlobDownload(zipBlob, `${sanitizeFilename(state.title)}.zip`);
 
     if (failures.length > 0) {
+      const imageFailures = failures.filter((failure) => failure.kind === "image").length;
+      const liveFailures = failures.filter((failure) => failure.kind === "live").length;
+      const failureParts = [];
+      if (imageFailures) failureParts.push(`${imageFailures} 张原图`);
+      if (liveFailures) failureParts.push(`${liveFailures} 个实况动态片段`);
       showToast(
-        `ZIP 与文案 TXT 已生成，其中 ${failures.length} 张因大小或网络限制未加入。`,
-        "error"
+        `ZIP 与文案 TXT 已生成，其中 ${failureParts.join("、")}因大小或网络限制未加入。`,
+        "error",
+        6200
       );
     } else {
-      showToast("全部原图与文案 TXT 已打包，ZIP 开始保存。", "success");
+      const liveSummary = downloadedLiveVideos
+        ? `、${downloadedLiveVideos} 个实况动态片段`
+        : "";
+      showToast(
+        `${downloadedImages} 张原图${liveSummary}与文案 TXT 已打包，ZIP 开始保存。`,
+        "success"
+      );
     }
   } catch (error) {
-    showToast(error.message, "error");
+    showToast(
+      error.message,
+      "error",
+      isArchiveSizeLimitError(error) ? 7200 : 3200
+    );
   } finally {
     state.busy = false;
     elements.selectAllButton.disabled = false;
@@ -1339,9 +1924,11 @@ elements.form.addEventListener("submit", async (event) => {
     state.strategy = payload.strategy || "";
     state.selected = new Set(state.images.map((image) => image.index));
     renderResults();
+    const parsedLivePhotoCount = livePhotoCount();
     const summary = [
       state.content ? "完整文案" : "",
       state.images.length ? `${state.images.length} 张无水印原图` : "",
+      parsedLivePhotoCount ? `${parsedLivePhotoCount} 张实况图片` : "",
       state.videos.length ? `${state.videos.length} 个视频清晰度` : ""
     ].filter(Boolean).join("、");
     showToast(`${engineLabel()} 成功解析${summary ? `：${summary}` : ""}`, "success");
@@ -1421,7 +2008,7 @@ elements.copyLinksButton.addEventListener("click", (event) => {
     text: links,
     trigger: event.currentTarget,
     label: "链接",
-    successMessage: "所选原图链接已复制"
+    successMessage: "所选静态原图链接已复制"
   });
 });
 

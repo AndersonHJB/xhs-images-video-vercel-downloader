@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="小红书图片与视频下载工具的项目更新记录，包含每次改进、功能增加、修复内容与提交时间。"
+      content="小红书图片、实况与视频下载工具的项目更新记录，包含每次改进、功能增加、修复内容与提交时间。"
     />
     <meta name="theme-color" content="#fefcf6" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -17,7 +17,7 @@
     />
     <link rel="stylesheet" href="/style.css" />
     <link rel="stylesheet" href="/changelog.css" />
-    <title>项目更新记录｜小红书图片与视频下载</title>
+    <title>项目更新记录｜小红书图片、实况与视频下载</title>
   </head>
   <body class="changelog-page">
     <header class="app-header">
@@ -68,17 +68,17 @@
           <aside class="release-summary" aria-label="项目版本概览">
             <div class="summary-heading">
               <span>REPOSITORY SNAPSHOT</span>
-              <strong>9950b13</strong>
-              <small>origin/main · 2026.08.23 15:54</small>
+              <strong>7a2c250</strong>
+              <small>origin/main · 2026.08.23 16:35</small>
             </div>
 
             <div class="summary-grid">
               <div class="summary-stat">
-                <strong>9</strong>
+                <strong>10</strong>
                 <span>历史提交</span>
               </div>
               <div class="summary-stat">
-                <strong>v1.3</strong>
+                <strong>v1.4</strong>
                 <span>当前包版本</span>
               </div>
               <div class="summary-stat">
@@ -86,7 +86,7 @@
                 <span>后台引擎</span>
               </div>
               <div class="summary-stat">
-                <strong>30</strong>
+                <strong>30+</strong>
                 <span>自动测试</span>
               </div>
             </div>
@@ -101,6 +101,7 @@
             <h2 id="ledger-title">从现在，<br />回到最初。</h2>
 
             <nav class="release-index-nav" aria-label="更新记录快速定位">
+              <a href="#live-photo-update"><span>v1.4</span><strong>实况图片下载</strong></a>
               <a href="#clipboard-compat-update"><span>NOW</span><strong>剪贴板兼容</strong></a>
               <a href="#mobile-share-update"><span>LINK</span><strong>手机分享短链</strong></a>
               <a href="#brand-update"><span>BRAND</span><strong>Bornforthis 品牌</strong></a>
@@ -119,7 +120,62 @@
           </aside>
 
           <div class="release-feed">
-            <article id="clipboard-compat-update" class="release-entry release-entry-featured">
+            <article id="live-photo-update" class="release-entry release-entry-featured">
+              <div class="release-entry-rail">
+                <span class="release-dot" aria-hidden="true"></span>
+                <time datetime="2026-08-24">
+                  <span>08.24</span>
+                  <small>2026 · NOW</small>
+                </time>
+              </div>
+
+              <div class="release-card">
+                <header class="release-card-heading">
+                  <div>
+                    <div class="release-badges">
+                      <span class="release-badge release-badge-red">v1.4</span>
+                      <span class="release-status">功能增加 · 待发布</span>
+                    </div>
+                    <h3>实况图片，静态与动态一起带走</h3>
+                  </div>
+                  <span class="workspace-label">WORKSPACE</span>
+                </header>
+
+                <p class="release-lead">
+                  现在会按原帖顺序识别每张实况图片，并把静态 JPG 与同一项中的动态 MP4 精确配对保存。
+                </p>
+
+                <div class="change-list">
+                  <div class="change-item">
+                    <span aria-hidden="true">01</span>
+                    <p><strong>精确识别实况结构</strong>读取 imageList 内的 livePhoto 与 H.264 / H.265 / H.266 / AV1 流，不混入帖子视频或相关推荐。</p>
+                  </div>
+                  <div class="change-item">
+                    <span aria-hidden="true">02</span>
+                    <p><strong>两种单项下载</strong>“下载实况 ZIP”保存同编号 JPG + MP4 素材包，“下载实况 MP4”可单独保存动态片段；原图下载保持不变。</p>
+                  </div>
+                  <div class="change-item">
+                    <span aria-hidden="true">03</span>
+                    <p><strong>批量 ZIP 同步升级</strong>勾选下载会自动加入所有配对动态片段和文案 TXT，并保证失败的原图不会留下孤立实况视频。</p>
+                  </div>
+                  <div class="change-item">
+                    <span aria-hidden="true">04</span>
+                    <p><strong>浏览器内存保护</strong>桌面端使用 256 MiB 归档预算，移动端或低内存设备使用 128 MiB；超限时提示减少勾选或分批下载。</p>
+                  </div>
+                  <div class="change-item">
+                    <span aria-hidden="true">05</span>
+                    <p><strong>归档结构复核</strong>生成前精确计算 UTF-8 文件名、中央目录和 ZIP32 开销，下载与最终 ZIP 共同校验体积。</p>
+                  </div>
+                </div>
+
+                <div class="release-card-footer">
+                  <span>SCOPE · LIVE PHOTO / MP4 / ZIP / RESPONSIVE</span>
+                  <span>双引擎 · Node / Python</span>
+                </div>
+              </div>
+            </article>
+
+            <article id="clipboard-compat-update" class="release-entry">
               <div class="release-entry-rail">
                 <span class="release-dot" aria-hidden="true"></span>
                 <time datetime="2026-08-23T16:23:53+08:00">
@@ -668,7 +724,7 @@
           <span class="footer-mark" aria-hidden="true">↓</span>
           <strong>每次改变，都讲清楚。</strong>
         </div>
-        <p>本页基于 origin/main 的 Git 提交记录整理，截至 9950b13。</p>
+        <p>本页基于 origin/main 的 Git 提交记录整理，截至 7a2c250。</p>
         <div class="footer-credits">
           <a
             class="design-credit"

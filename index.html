@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="粘贴小红书分享文案，复制标题与正文，批量复制图片，并下载附带文案 TXT 的无水印原图 ZIP 或视频。" />
+    <meta name="description" content="粘贴小红书分享文案，下载无水印原图、实况图片 JPG + MP4 素材 ZIP、实况 MP4 和普通视频，并可批量打包文案 TXT。" />
     <meta name="theme-color" content="#fefcf6" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -13,7 +13,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/style.css" />
-    <title>小红书图片与视频下载</title>
+    <title>小红书图片、实况与视频下载</title>
   </head>
   <body>
     <header class="app-header">
@@ -47,7 +47,7 @@
             <span class="eyebrow">PRIVATE MEDIA WORKBENCH</span>
             <h1 id="hero-title">把喜欢的内容，<br /><span class="hl-yellow">干净地保存下来。</span></h1>
             <p>
-              粘贴一段分享文案，就能解析公开笔记中的原图与视频。无需安装额外 App，下载与打包都在当前浏览器完成。
+              粘贴一段分享文案，就能解析公开笔记中的原图、实况图片与视频。无需安装额外 App，下载与打包都在当前浏览器完成。
             </p>
           </div>
 
@@ -90,7 +90,7 @@
                 </label>
               </div>
               <p id="engine-hint" class="engine-hint">
-                当前使用 Node.js 完成页面抓取、图片代理和视频分段下载。
+                当前使用 Node.js 完成页面抓取、图片代理和媒体分段下载。
               </p>
             </fieldset>
 
@@ -115,7 +115,7 @@
           <div class="hero-index" aria-label="功能特点">
             <div class="hero-index-item">
               <span>01</span>
-              <strong>原图无水印</strong>
+              <strong>原图与实况</strong>
             </div>
             <div class="hero-index-item">
               <span>02</span>
@@ -132,7 +132,7 @@
           <div class="empty-state-copy">
             <span class="empty-index">READY / 00</span>
             <h2 id="empty-title">内容会在这里展开</h2>
-            <p>支持图文与视频笔记、手机 xhslink.cn 短链、电脑端完整链接，以及带文字的整段分享内容。</p>
+            <p>支持图文、实况与视频笔记，兼容手机 xhslink.cn 短链、电脑端完整链接，以及带文字的整段分享内容。</p>
           </div>
 
           <div class="system-flow" aria-label="使用流程：粘贴、解析、下载">
@@ -151,7 +151,7 @@
             <div class="flow-step">
               <span>03</span>
               <strong>下载</strong>
-              <small>图片 / 视频</small>
+              <small>图片 / 实况 / 视频</small>
             </div>
           </div>
         </section>
@@ -171,8 +171,8 @@
                 class="button button-copy-images"
                 type="button"
                 aria-describedby="clipboard-hint"
-              >复制所选图片</button>
-              <button id="copy-links-button" class="button button-secondary" type="button">复制链接</button>
+              >复制所选静态图</button>
+              <button id="copy-links-button" class="button button-secondary" type="button">复制原图链接</button>
               <button id="download-zip-button" class="button button-dark" type="button">下载所选 ZIP</button>
             </div>
           </div>
@@ -186,7 +186,7 @@
             <span class="clipboard-fallback-label">CLIPBOARD / 浏览器限制</span>
             <div>
               <strong id="clipboard-fallback-title">权限已经生效，多图写入仍受 Chrome 限制。</strong>
-              <p>Chrome 暂不允许网页一次写入多张独立图片。你可以复制首张后逐张处理，或下载包含全部原图的 ZIP。</p>
+              <p>Chrome 暂不允许网页一次写入多张独立静态图片。你可以复制首张后逐张处理，或下载包含全部原图与配对实况片段的 ZIP。</p>
             </div>
             <button
               id="copy-first-selected-image-button"
@@ -245,12 +245,12 @@
           <section id="image-section" class="image-section">
             <div class="media-section-heading image-section-heading">
               <div>
-                <span class="section-label">IMAGES / 图片下载</span>
-                <h3>无水印原图</h3>
+                <span class="section-label">IMAGES + LIVE / 图片与实况下载</span>
+                <h3>无水印原图与实况素材</h3>
               </div>
               <span id="clipboard-hint" class="section-aside">
-                支持逐张复制 · 可用浏览器将尝试多图写入<br />
-                <small>Chrome 目前不支持网页复制多张独立图片 · ZIP 自动附带文案 TXT</small>
+                实况可下载配对素材 ZIP，也可单独保存 MP4<br />
+                <small>素材 ZIP 内含同编号 JPG + MP4，不等同于自动生成 iOS 原生 Live Photo · 批量 ZIP 自动附带文案 TXT</small>
               </span>
             </div>
             <div id="image-grid" class="image-grid"></div>
@@ -263,7 +263,7 @@
           <span class="footer-mark" aria-hidden="true">↓</span>
           <strong>媒体只经过你的浏览器。</strong>
         </div>
-        <p>图片 ZIP 与视频文件都在本地生成，不会上传到本站存储。</p>
+        <p>图片、实况 ZIP 与视频文件都在本地生成，不会上传到本站存储。</p>
         <div class="footer-credits">
           <a
             class="design-credit"

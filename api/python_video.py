@@ -33,11 +33,16 @@ def is_xhs_video_url(value: str) -> bool:
         parsed = urlparse(normalize_url(value))
     except ValueError:
         return False
-    host = parsed.netloc.lower()
+    host = (parsed.hostname or "").lower()
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
     return bool(
         parsed.scheme == "https"
         and parsed.username is None
         and parsed.password is None
+        and port in (None, 443)
         and (host == "xhscdn.com" or host.endswith(".xhscdn.com"))
         and len(parsed.path) > 1
     )

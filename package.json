@@ -1,9 +1,9 @@
 {
   "name": "xhs-vercel-downloader",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
-  "description": "支持 Node.js/Python 双后台切换的小红书无水印图片与视频下载网站",
+  "description": "支持 Node.js/Python 双后台切换的小红书无水印图片、实况与视频下载网站",
   "scripts": {
     "dev": "vercel dev",
     "test": "npm run test:node && npm run test:python",

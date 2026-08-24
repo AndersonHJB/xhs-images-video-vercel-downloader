@@ -1171,6 +1171,41 @@ textarea:focus {
   transform: scale(1.025);
 }
 
+.live-photo-badge {
+  position: absolute;
+  z-index: 1;
+  top: 14px;
+  right: 14px;
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  color: var(--cream);
+  background: var(--red-deep);
+  box-shadow: 3px 3px 0 var(--yellow);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.live-photo-badge > span {
+  color: var(--yellow);
+  font-size: 0.58rem;
+}
+
+.live-photo-badge.is-unavailable {
+  color: var(--ink);
+  background: var(--cream-deep);
+  box-shadow: 3px 3px 0 rgba(26, 26, 46, 0.14);
+}
+
+.live-photo-badge.is-unavailable > span {
+  color: var(--red-deep);
+}
+
 .image-number {
   position: absolute;
   right: 12px;
@@ -1240,6 +1275,19 @@ textarea:focus {
   padding: 12px;
 }
 
+.image-card.is-live-photo .image-card-actions {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.image-card.is-live-photo .image-card-actions > * {
+  grid-column: span 2;
+}
+
+.image-card.is-live-photo .image-card-actions > .card-button-live,
+.image-card.is-live-photo .image-card-actions > .card-button-live-video {
+  grid-column: span 3;
+}
+
 .card-button {
   min-height: 44px;
   min-width: 0;
@@ -1275,6 +1323,29 @@ textarea:focus {
 }
 
 .card-button-copy:hover {
+  color: var(--cream);
+  background: var(--blue-deep);
+}
+
+.card-button-live {
+  border-color: var(--red-deep);
+  color: var(--cream);
+  background: var(--red-deep);
+}
+
+.card-button-live:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+  background: var(--yellow);
+}
+
+.card-button-live-video {
+  border-color: var(--ink);
+  color: var(--ink);
+  background: var(--yellow);
+}
+
+.card-button-live-video:hover {
   color: var(--cream);
   background: var(--blue-deep);
 }

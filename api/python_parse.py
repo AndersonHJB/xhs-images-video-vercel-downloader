@@ -65,7 +65,7 @@ DIRECT_IMAGE_HOSTS = {
 }
 IMAGE_LIST_KEYS = ("imageList", "image_list", "images")
 NOTE_WRAPPER_KEYS = ("note", "noteData", "note_data", "data")
-VIDEO_STREAM_KEYS = ("h264", "h265", "av1")
+VIDEO_STREAM_KEYS = ("h264", "h265", "h266", "av1")
 VIDEO_META_KEYS = {
     "og:video",
     "og:video:url",
@@ -106,29 +106,47 @@ def normalize_image_url(raw: Any) -> str:
 def is_xhs_image_url(value: Any) -> bool:
     try:
         parsed = urlparse(normalize_image_url(value))
+        port = parsed.port
     except ValueError:
         return False
-    host = parsed.netloc.lower()
-    return parsed.scheme == "https" and (
-        host.endswith("xhscdn.com") or host == "ci.xiaohongshu.com"
+    host = (parsed.hostname or "").lower()
+    return bool(
+        parsed.scheme == "https"
+        and not parsed.username
+        and not parsed.password
+        and port in (None, 443)
+        and (
+            host == "xhscdn.com"
+            or host.endswith(".xhscdn.com")
+            or host == "ci.xiaohongshu.com"
+        )
     )
 
 
 def is_direct_image_url(value: str) -> bool:
-    parsed = urlparse(normalize_image_url(value))
-    return parsed.netloc.lower() in DIRECT_IMAGE_HOSTS
+    normalized = normalize_image_url(value)
+    try:
+        parsed = urlparse(normalized)
+    except ValueError:
+        return False
+    return bool(
+        is_xhs_image_url(normalized)
+        and (parsed.hostname or "").lower() in DIRECT_IMAGE_HOSTS
+    )
 
 
 def is_xhs_video_url(value: Any) -> bool:
     try:
         parsed = urlparse(normalize_image_url(value))
+        port = parsed.port
     except ValueError:
         return False
-    host = parsed.netloc.lower()
+    host = (parsed.hostname or "").lower()
     return bool(
         parsed.scheme == "https"
         and not parsed.username
         and not parsed.password
+        and port in (None, 443)
         and (host == "xhscdn.com" or host.endswith(".xhscdn.com"))
         and len(parsed.path) > 1
     )
@@ -312,6 +330,72 @@ def choose_one_url_per_image(image_list: Any) -> list[str]:
     return unique_keep_order(selected)
 
 
+def is_live_photo_item(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+
+    def enabled(value: Any) -> bool:
+        if value is True or value == 1:
+            return True
+        return isinstance(value, str) and value.strip().lower() in {"1", "true"}
+
+    return any(
+        enabled(item.get(key))
+        for key in ("livePhoto", "live_photo", "isLivePhoto", "is_live_photo")
+    )
+
+
+def choose_image_assets(image_list: Any) -> list[dict[str, Any]]:
+    """按 imageList 顺序保留静态图及同项实况动态流。"""
+    if not isinstance(image_list, list):
+        return []
+
+    assets: list[dict[str, Any]] = []
+    for item in image_list:
+        # stream 里的 MP4 同样位于 xhscdn.com，选静态图时必须排除这些字段。
+        image_only_item = (
+            {
+                key: value
+                for key, value in item.items()
+                if key not in {"stream", "livePhotoStream", "live_photo_stream"}
+            }
+            if isinstance(item, dict)
+            else item
+        )
+        urls = choose_one_url_per_image([image_only_item])
+        if not urls:
+            continue
+
+        stream_root = None
+        if isinstance(item, dict):
+            stream_root = next(
+                (
+                    value
+                    for value in (
+                        item.get("stream"),
+                        item.get("livePhotoStream"),
+                        item.get("live_photo_stream"),
+                    )
+                    if isinstance(value, dict) and value
+                ),
+                None,
+            )
+        live_streams = extract_streams_from_root(
+            stream_root,
+            "live-photo-stream",
+        )
+        assets.append(
+            {
+                "sourceUrl": urls[0],
+                "livePhoto": is_live_photo_item(item) or bool(live_streams),
+                "liveVideo": live_streams[0] if live_streams else None,
+            }
+        )
+
+    # 不按 URL 或 token 去重：相同静态图也可能配有不同动态流。
+    return assets
+
+
 
 def normalize_number(value: Any) -> int:
     try:
@@ -351,8 +435,10 @@ def collect_video_urls_from_stream(stream: Any) -> list[str]:
 def codec_priority(codec: Any) -> int:
     normalized = str(codec or "").lower()
     if "264" in normalized or normalized == "avc":
-        return 3
+        return 4
     if "265" in normalized or "hevc" in normalized:
+        return 3
+    if "266" in normalized or "vvc" in normalized:
         return 2
     if "av1" in normalized:
         return 1
@@ -370,58 +456,84 @@ def video_quality_score(video: dict[str, Any]) -> int:
     )
 
 
+def extract_streams_from_root(
+    stream_root: Any,
+    source: str = "media-stream",
+) -> list[dict[str, Any]]:
+    if not isinstance(stream_root, dict):
+        return []
+
+    streams: list[dict[str, Any]] = []
+    for stream_key in VIDEO_STREAM_KEYS:
+        raw_streams = stream_root.get(stream_key)
+        if isinstance(raw_streams, list):
+            stream_list = raw_streams
+        elif isinstance(raw_streams, dict):
+            stream_list = [raw_streams]
+        else:
+            continue
+        for item in stream_list:
+            if not isinstance(item, dict):
+                continue
+            urls = collect_video_urls_from_stream(item)
+            if not urls:
+                continue
+            codec = (
+                item.get("videoCodec")
+                or item.get("video_codec")
+                or item.get("codec")
+                or stream_key
+            )
+            streams.append(
+                {
+                    "url": urls[0],
+                    "backupUrls": urls[1:],
+                    "codec": str(codec).lower(),
+                    "width": normalize_number(item.get("width")),
+                    "height": normalize_number(item.get("height")),
+                    "bitrate": normalize_number(
+                        item.get("videoBitrate")
+                        or item.get("video_bitrate")
+                        or item.get("bitrate")
+                    ),
+                    "size": normalize_number(
+                        item.get("size")
+                        or item.get("fileSize")
+                        or item.get("file_size")
+                    ),
+                    "duration": normalize_number(
+                        item.get("videoDuration")
+                        or item.get("video_duration")
+                        or item.get("duration")
+                    ),
+                    "qualityType": str(
+                        item.get("qualityType")
+                        or item.get("quality_type")
+                        or ""
+                    ),
+                    "source": source,
+                }
+            )
+
+    deduped: dict[str, dict[str, Any]] = {}
+    for stream in streams:
+        url = str(stream.get("url") or "")
+        existing = deduped.get(url)
+        if existing is None or video_quality_score(stream) > video_quality_score(existing):
+            deduped[url] = stream
+
+    return sorted(deduped.values(), key=video_quality_score, reverse=True)
+
+
 def extract_video_streams_from_note(note: Any) -> list[dict[str, Any]]:
     """只从当前笔记对象读取视频流，不扫描相关推荐。"""
     if not isinstance(note, dict):
         return []
 
-    streams: list[dict[str, Any]] = []
     video = note.get("video")
     media = video.get("media") if isinstance(video, dict) else None
     stream_root = media.get("stream") if isinstance(media, dict) else None
-
-    if isinstance(stream_root, dict):
-        for stream_key in VIDEO_STREAM_KEYS:
-            stream_list = stream_root.get(stream_key)
-            if not isinstance(stream_list, list):
-                continue
-            for item in stream_list:
-                if not isinstance(item, dict):
-                    continue
-                urls = collect_video_urls_from_stream(item)
-                if not urls:
-                    continue
-                codec = (
-                    item.get("videoCodec")
-                    or item.get("video_codec")
-                    or item.get("codec")
-                    or stream_key
-                )
-                streams.append(
-                    {
-                        "url": urls[0],
-                        "backupUrls": urls[1:],
-                        "codec": str(codec).lower(),
-                        "width": normalize_number(item.get("width")),
-                        "height": normalize_number(item.get("height")),
-                        "bitrate": normalize_number(
-                            item.get("videoBitrate")
-                            or item.get("video_bitrate")
-                            or item.get("bitrate")
-                        ),
-                        "size": normalize_number(
-                            item.get("size")
-                            or item.get("fileSize")
-                            or item.get("file_size")
-                        ),
-                        "qualityType": str(
-                            item.get("qualityType")
-                            or item.get("quality_type")
-                            or ""
-                        ),
-                        "source": "media-stream",
-                    }
-                )
+    streams = extract_streams_from_root(stream_root, "media-stream")
 
     if not streams and isinstance(video, dict):
         consumer = video.get("consumer")
@@ -449,14 +561,7 @@ def extract_video_streams_from_note(note: Any) -> list[dict[str, Any]]:
                     }
                 )
 
-    deduped: dict[str, dict[str, Any]] = {}
-    for stream in streams:
-        url = str(stream.get("url") or "")
-        existing = deduped.get(url)
-        if existing is None or video_quality_score(stream) > video_quality_score(existing):
-            deduped[url] = stream
-
-    return sorted(deduped.values(), key=video_quality_score, reverse=True)
+    return streams
 
 
 def format_video_label(video: dict[str, Any], index: int) -> str:
@@ -715,13 +820,13 @@ def select_exact_note_from_states(
     for state in extract_initial_states(page_html):
         for candidate in find_exact_note_candidates(state, note_id):
             image_list = direct_image_list(candidate)
-            urls = choose_one_url_per_image(image_list) if image_list is not None else []
+            images = choose_image_assets(image_list) if image_list is not None else []
             videos = extract_video_streams_from_note(candidate)
-            if not urls and not videos:
+            if not images and not videos:
                 continue
             matches.append(
                 {
-                    "urls": urls,
+                    "images": images,
                     "videos": videos,
                     "title": extract_title_from_note_object(candidate),
                     "content": extract_content_from_note_object(candidate),
@@ -733,8 +838,10 @@ def select_exact_note_from_states(
     matches.sort(
         key=lambda item: (
             int(bool(item["exact_id"])),
-            len(item["urls"]) + len(item["videos"]),
-            len(item["urls"]),
+            len(item["images"])
+            + len(item["videos"])
+            + sum(1 for image in item["images"] if image.get("liveVideo")),
+            len(item["images"]),
         ),
         reverse=True,
     )
@@ -750,46 +857,143 @@ def find_image_list_arrays_with_positions(text: str) -> list[dict[str, Any]]:
         balanced = extract_balanced_structure(text, start, "[", "]")
         if balanced:
             array_text, end = balanced
-            arrays.append({"start": start, "end": end, "text": array_text})
+            arrays.append(
+                {
+                    "key_start": match.start(),
+                    "start": start,
+                    "end": end,
+                    "text": array_text,
+                }
+            )
     return arrays
 
 
-def all_indexes_of(text: str, needle: str) -> list[int]:
-    indexes: list[int] = []
-    offset = 0
-    while offset < len(text):
-        index = text.find(needle, offset)
-        if index < 0:
-            break
-        indexes.append(index)
-        offset = index + len(needle)
-    return indexes
+def object_ranges_at_positions(
+    text: str, positions: Iterable[int]
+) -> dict[int, dict[str, int]]:
+    requested = sorted(set(positions))
+    owner_starts: dict[int, int] = {}
+    object_ends: dict[int, int] = {}
+    object_stack: list[int] = []
+    requested_index = 0
+    in_string = False
+    quote = ""
+    escape = False
+
+    for index, char in enumerate(text):
+        while requested_index < len(requested) and requested[requested_index] < index:
+            requested_index += 1
+        while requested_index < len(requested) and requested[requested_index] == index:
+            if not in_string and object_stack:
+                owner_starts[index] = object_stack[-1]
+            requested_index += 1
+
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == quote:
+                in_string = False
+                quote = ""
+            continue
+
+        if char in {'"', "'"}:
+            in_string = True
+            quote = char
+        elif char == "{":
+            object_stack.append(index)
+        elif char == "}" and object_stack:
+            start = object_stack.pop()
+            object_ends[start] = index + 1
+
+    ranges: dict[int, dict[str, int]] = {}
+    for position, start in owner_starts.items():
+        end = object_ends.get(start)
+        if end is not None and end > position:
+            ranges[position] = {"start": start, "end": end}
+    return ranges
+
+
+def target_note_object_ranges(text: str, note_id: str) -> list[dict[str, int]]:
+    pattern = re.compile(
+        r'["\'](?:noteId|note_id)["\']\s*:\s*(["\'])'
+        r'([A-Za-z0-9_-]{12,64})\1'
+    )
+    anchors = [
+        match.start()
+        for match in pattern.finditer(text)
+        if match.group(2) == note_id
+    ]
+    ranges_by_anchor = object_ranges_at_positions(text, anchors)
+    ranges: list[dict[str, int]] = []
+    seen: set[tuple[int, int]] = set()
+    for anchor in anchors:
+        object_range = ranges_by_anchor.get(anchor)
+        if not object_range:
+            continue
+        key = (object_range["start"], object_range["end"])
+        if key in seen:
+            continue
+        seen.add(key)
+        ranges.append({**object_range, "anchor": anchor})
+    return ranges
+
+
+def target_owner_anchors(
+    ranges: list[dict[str, int]],
+) -> dict[tuple[int, int], list[int]]:
+    owners: dict[tuple[int, int], list[int]] = {}
+    for item in ranges:
+        owners.setdefault((item["start"], item["end"]), []).append(item["anchor"])
+    return owners
 
 
 def extract_target_local_image_list(
     page_html: str, note_id: str
 ) -> dict[str, Any] | None:
-    note_indexes = all_indexes_of(page_html, note_id)
-    if not note_indexes:
+    note_ranges = target_note_object_ranges(page_html, note_id)
+    if not note_ranges:
         return None
 
+    arrays = find_image_list_arrays_with_positions(page_html)
+    owner_ranges = object_ranges_at_positions(
+        page_html, (item["key_start"] for item in arrays)
+    )
+    owner_anchors = target_owner_anchors(note_ranges)
     candidates: list[dict[str, Any]] = []
-    for array in find_image_list_arrays_with_positions(page_html):
-        distance = min(abs(array["start"] - index) for index in note_indexes)
-        if distance > 60000:
+    for array in arrays:
+        owner = owner_ranges.get(array["key_start"])
+        anchors = (
+            owner_anchors.get((owner["start"], owner["end"]))
+            if owner
+            else None
+        )
+        if not anchors:
             continue
+        distance = min(abs(array["start"] - anchor) for anchor in anchors)
         parsed = parse_json_like(array["text"])
         if isinstance(parsed, list):
-            urls = choose_one_url_per_image(parsed)
+            images = choose_image_assets(parsed)
         else:
-            urls = unique_keep_order(XHS_IMAGE_PATTERN.findall(array["text"]))
-        if urls:
-            candidates.append({"distance": distance, "urls": urls})
+            images = [
+                {
+                    "sourceUrl": source_url,
+                    "livePhoto": False,
+                    "liveVideo": None,
+                }
+                for source_url in unique_keep_order(
+                    XHS_IMAGE_PATTERN.findall(array["text"])
+                )
+                if is_direct_image_url(source_url)
+            ]
+        if images:
+            candidates.append({"distance": distance, "images": images})
 
     if not candidates:
         return None
-    candidates.sort(key=lambda item: (item["distance"], -len(item["urls"])))
-    return {"urls": candidates[0]["urls"], "title": ""}
+    candidates.sort(key=lambda item: (item["distance"], -len(item["images"])))
+    return {"images": candidates[0]["images"], "title": ""}
 
 
 
@@ -803,22 +1007,40 @@ def find_video_objects_with_positions(text: str) -> list[dict[str, Any]]:
         balanced = extract_balanced_structure(text, start, "{", "}")
         if balanced:
             object_text, end = balanced
-            objects.append({"start": start, "end": end, "text": object_text})
+            objects.append(
+                {
+                    "key_start": match.start(),
+                    "start": start,
+                    "end": end,
+                    "text": object_text,
+                }
+            )
     return objects
 
 
 def extract_target_local_video_streams(
     page_html: str, note_id: str
 ) -> list[dict[str, Any]]:
-    note_indexes = all_indexes_of(page_html, note_id)
-    if not note_indexes:
+    note_ranges = target_note_object_ranges(page_html, note_id)
+    if not note_ranges:
         return []
 
+    objects = find_video_objects_with_positions(page_html)
+    owner_ranges = object_ranges_at_positions(
+        page_html, (item["key_start"] for item in objects)
+    )
+    owner_anchors = target_owner_anchors(note_ranges)
     candidates: list[dict[str, Any]] = []
-    for item in find_video_objects_with_positions(page_html):
-        distance = min(abs(item["start"] - index) for index in note_indexes)
-        if distance > 60000:
+    for item in objects:
+        owner = owner_ranges.get(item["key_start"])
+        anchors = (
+            owner_anchors.get((owner["start"], owner["end"]))
+            if owner
+            else None
+        )
+        if not anchors:
             continue
+        distance = min(abs(item["start"] - anchor) for anchor in anchors)
         parsed = parse_json_like(item["text"])
         if not isinstance(parsed, dict):
             continue
@@ -887,7 +1109,14 @@ def extract_original_asset_token(url: str) -> str | None:
     if not is_xhs_image_url(normalized):
         return None
 
-    parts = [unquote(part) for part in parsed.path.split("/") if part]
+    parts: list[str] = []
+    for part in (value for value in parsed.path.split("/") if value):
+        if re.search(r"%(?![0-9A-Fa-f]{2})", part):
+            return None
+        try:
+            parts.append(unquote(part, errors="strict"))
+        except UnicodeDecodeError:
+            return None
     if not parts:
         return None
 
@@ -943,15 +1172,31 @@ def extract_page_title(page_html: str) -> str:
     return "小红书图片"
 
 
-def convert_source_urls(source_urls: Iterable[str]) -> list[dict[str, str]]:
-    seen_tokens: set[str] = set()
-    images: list[dict[str, str]] = []
-    for source_url in source_urls:
-        token = extract_original_asset_token(source_url)
-        if not token or not validate_asset_token(token) or token in seen_tokens:
+def convert_image_assets(image_assets: Iterable[Any]) -> list[dict[str, Any]]:
+    images: list[dict[str, Any]] = []
+    for asset in image_assets:
+        source_url = (
+            asset.get("sourceUrl")
+            if isinstance(asset, dict)
+            else asset
+        )
+        if not isinstance(source_url, str):
             continue
-        seen_tokens.add(token)
-        images.append({"token": token, "url": build_no_watermark_url(token)})
+        token = extract_original_asset_token(source_url)
+        if not token or not validate_asset_token(token):
+            continue
+        images.append(
+            {
+                "token": token,
+                "url": build_no_watermark_url(token),
+                "livePhoto": bool(
+                    asset.get("livePhoto") if isinstance(asset, dict) else False
+                ),
+                "liveVideo": (
+                    asset.get("liveVideo") if isinstance(asset, dict) else None
+                ),
+            }
+        )
     return images
 
 
@@ -970,7 +1215,7 @@ def parse_note_html(page_html: str, note_id: str) -> dict[str, Any]:
         return {
             "title": exact["title"] or extract_page_title(page_html),
             "content": exact["content"],
-            "images": convert_source_urls(exact["urls"])[:50],
+            "images": convert_image_assets(exact["images"])[:50],
             "videos": prepare_video_results(exact["videos"]),
             "strategy": "exact-initial-state",
         }
@@ -983,8 +1228,8 @@ def parse_note_html(page_html: str, note_id: str) -> dict[str, Any]:
                 local_images.get("title", "") if local_images else ""
             ) or extract_page_title(page_html),
             "content": "",
-            "images": convert_source_urls(
-                local_images.get("urls", []) if local_images else []
+            "images": convert_image_assets(
+                local_images.get("images", []) if local_images else []
             )[:50],
             "videos": prepare_video_results(local_videos),
             "strategy": (
@@ -1001,7 +1246,7 @@ def parse_note_html(page_html: str, note_id: str) -> dict[str, Any]:
     return {
         "title": extract_page_title(page_html),
         "content": "",
-        "images": convert_source_urls([primary_image]) if primary_image else [],
+        "images": convert_image_assets([primary_image]) if primary_image else [],
         "videos": prepare_video_results([primary_video]) if primary_video else [],
         "strategy": (
             "primary-meta-media"
@@ -1130,12 +1375,15 @@ class handler(BaseHTTPRequestHandler):
                         "content": "",
                         "type": "image",
                         "count": 1,
+                        "livePhotoCount": 0,
                         "videoCount": 0,
                         "images": [
                             {
                                 "index": 1,
                                 "token": token,
                                 "url": build_no_watermark_url(token),
+                                "livePhoto": False,
+                                "liveVideo": None,
                             }
                         ],
                         "videos": [],
@@ -1160,6 +1408,22 @@ class handler(BaseHTTPRequestHandler):
                     "index": index,
                     "token": image["token"],
                     "url": image["url"],
+                    "livePhoto": bool(image.get("livePhoto")),
+                    "liveVideo": (
+                        {
+                            "url": image["liveVideo"].get("url", ""),
+                            "backupUrls": image["liveVideo"].get("backupUrls", []),
+                            "codec": image["liveVideo"].get("codec", ""),
+                            "width": image["liveVideo"].get("width", 0),
+                            "height": image["liveVideo"].get("height", 0),
+                            "bitrate": image["liveVideo"].get("bitrate", 0),
+                            "size": image["liveVideo"].get("size", 0),
+                            "duration": image["liveVideo"].get("duration", 0),
+                            "qualityType": image["liveVideo"].get("qualityType", ""),
+                        }
+                        if isinstance(image.get("liveVideo"), dict)
+                        else None
+                    ),
                 }
                 for index, image in enumerate(parsed["images"], start=1)
             ]
@@ -1192,6 +1456,9 @@ class handler(BaseHTTPRequestHandler):
                         "mixed" if images and videos else "video" if videos else "image"
                     ),
                     "count": len(images),
+                    "livePhotoCount": sum(
+                        1 for image in images if image.get("liveVideo")
+                    ),
                     "videoCount": len(videos),
                     "images": images,
                     "videos": videos,

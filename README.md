@@ -1,13 +1,14 @@
-# 小红书图片与视频下载器（Node.js + Python 双后台）
+# 小红书图片、实况与视频下载器（Node.js + Python 双后台）
 
 这是一个可直接部署到 Vercel 的小红书公开笔记媒体下载网站。访问者只需要粘贴分享文案或链接，即可解析当前笔记中的：
 
 - 无水印原图
+- 实况图片的静态原图与配对动态 MP4
 - 视频流与多个可用清晰度
 - 电脑端 `xiaohongshu.com` 长链与手机端 `xhslink.cn` 短链自动识别
 - 当前笔记标题与正文文案
 - 文案复制、逐张图片复制，以及支持平台上的多图剪贴板写入尝试
-- 图片单张下载、勾选下载与浏览器本地 ZIP（自动附带 `文案.txt`）
+- 图片单张下载、实况 JPG + MP4 素材 ZIP、实况 MP4 单独下载，以及勾选批量 ZIP（自动附带 `文案.txt`）
 - 视频浏览器分段下载、本地合并并保存为 MP4
 - Node.js / Python 双后台自由切换
 
@@ -18,6 +19,16 @@
 - 每张图片提供独立“复制图片”按钮；支持多项剪贴板的平台可对勾选图片发起一次写入。
 - 图片 ZIP 固定加入 UTF-8 BOM 编码的 `文案.txt`，包含标题、正文、来源、生成时间与解析引擎。
 - 图片剪贴板只在 HTTPS 或 localhost 可用；Chrome / Chromium 当前会拒绝多个 `ClipboardItem`，页面会区分该限制与权限错误，并提供复制首张、逐张复制、复制链接与 ZIP 回退。
+
+## v1.4 更新
+
+- Node.js 与 Python 两套解析器会按 `imageList` 顺序识别 `livePhoto`，并把同一项 `stream` 中的动态 MP4 与静态原图一一配对。
+- 实况卡片提供两个独立入口：“下载实况 ZIP”保存配对素材，“下载实况 MP4”只保存动态片段；原有“下载原图”保持不变。
+- 单张实况素材包命名为 `NN-live-photo.zip`，内部包含 `NN.jpg` 与 `NN-live.mp4`。
+- 勾选下载会把每张原图及其对应 `NN-live.mp4` 一并放入批量 ZIP，并继续附带 `文案.txt`。
+- 实况素材 ZIP 是 JPG + MP4 素材包，不会自动写入 Apple Photos 所需的原生 Live Photo 元数据。
+- 归档设置浏览器内存保护：桌面端上限 256 MiB，移动端或低内存设备上限 128 MiB；下载、备用线路、文案和最终 ZIP 共用同一预算。
+- ZIP 生成前会精确核对 UTF-8 文件名、目录开销、ZIP32 边界与最终体积，超限时提示减少勾选或分批下载。
 
 ## v1.3 更新
 
@@ -67,7 +78,7 @@
 
 ```bash
 git add .
-git commit -m "feat: add Xiaohongshu video download"
+git commit -m "feat: add Xiaohongshu live photo downloads"
 git push
 ```
 
@@ -106,10 +117,12 @@ npm test
 - 图文笔记原有解析结果保持不变。
 - 纯视频笔记即使没有 `imageList` 也可以解析。
 - H.264、H.265、AV1 多流提取与默认选择。
+- 实况图片与同项 H.264 / H.265 / H.266 / AV1 动态流保持一一配对。
 - 视频备用 CDN 地址保留。
 - Node.js 与 Python 两套解析逻辑结果一致。
 - 电脑长链、手机短链、Markdown 包裹链接与安全重定向边界。
 - ZIP 可解出 UTF-8 中文文件名的 `文案.txt`，且正文元数据完整。
+- ZIP 预估尺寸、中央目录、CRC、ZIP32 边界与不安全输入拒绝逻辑。
 
 ## 接口
 
@@ -128,14 +141,29 @@ POST /api/python_parse
 }
 ```
 
-返回值中保留原有 `images` 字段，并新增正文与视频字段：
+返回值中保留原有 `images` 字段，并新增正文、实况与视频字段：
 
 ```json
 {
   "title": "笔记标题",
   "content": "笔记正文文案",
-  "type": "video",
+  "type": "mixed",
+  "livePhotoCount": 1,
   "videoCount": 2,
+  "images": [
+    {
+      "index": 1,
+      "token": "...",
+      "url": "https://...xhscdn.com/...",
+      "livePhoto": true,
+      "liveVideo": {
+        "url": "https://...xhscdn.com/...",
+        "backupUrls": [],
+        "codec": "h264",
+        "size": 6800000
+      }
+    }
+  ],
   "videos": [
     {
       "index": 1,
@@ -171,7 +199,7 @@ GET /api/python_video?action=chunk&url=...&start=0&end=3499999
 
 前端会自动调用这些接口，不需要访问者手动操作。
 
-## 视频下载方式
+## 视频与实况动态片段下载方式
 
 视频通常大于 Vercel Function 的单次响应大小，因此项目不会让一个 Function 一次返回整个视频。流程是：
 
@@ -187,7 +215,7 @@ GET /api/python_video?action=chunk&url=...&start=0&end=3499999
 保存为 MP4
 ```
 
-如果视频源不支持分段，页面会尝试浏览器直连；仍失败时会打开视频原地址供用户保存。
+如果媒体源不支持分段，页面会尝试备用 CDN 与浏览器直连；普通视频仍失败时会打开原地址供用户保存。
 
 ## 安全与限制
 
@@ -196,6 +224,7 @@ GET /api/python_video?action=chunk&url=...&start=0&end=3499999
 - 只解析当前 `noteId` 的媒体对象，不全局扫描推荐内容。
 - 文案只读取当前 `noteId` 已锁定笔记对象的直属字段；降级解析宁可返回空文案，也不会猜测推荐内容。
 - 单个视频限制为 512 MB，避免浏览器本地合并占用过多内存。
+- 实况单项 ZIP、批量 ZIP 和单独 MP4 会先检查已知大小，再对实际响应逐段限流；归档超限时不会生成截断 ZIP。
 - 多图复制依赖标准 Async Clipboard API、HTTPS 与目标系统的多项剪贴板能力；不支持时请逐张复制或使用 ZIP。
 - 图片与视频不会在服务器持久化。
 - 临时签名的视频链接可能过期，解析后应及时下载。

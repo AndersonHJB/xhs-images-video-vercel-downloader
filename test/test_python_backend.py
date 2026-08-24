@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import re
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,6 +15,12 @@ SPEC = importlib.util.spec_from_file_location("python_parse", MODULE_PATH)
 assert SPEC and SPEC.loader
 python_parse = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(python_parse)
+
+VIDEO_MODULE_PATH = ROOT / "api" / "python_video.py"
+VIDEO_SPEC = importlib.util.spec_from_file_location("python_video", VIDEO_MODULE_PATH)
+assert VIDEO_SPEC and VIDEO_SPEC.loader
+python_video = importlib.util.module_from_spec(VIDEO_SPEC)
+VIDEO_SPEC.loader.exec_module(python_video)
 
 
 def image_url(identifier: str, variant: str = "!nd_dft_wlteh_webp_3") -> str:
@@ -35,7 +43,89 @@ def make_image_list(prefix: str, count: int) -> list[dict[str, str]]:
     ]
 
 
+def live_photo_video_url(host: str, identifier: str) -> str:
+    return f"http://{host}/stream/{identifier}.mp4"
+
+
+def make_live_photo_image(
+    identifier: str,
+    *,
+    live_photo: bool | None = True,
+    stream: bool = True,
+    stream_key: str = "h264",
+    stream_field: str = "stream",
+) -> dict[str, object]:
+    image: dict[str, object] = {
+        "urlDefault": image_url(identifier),
+        "urlPre": image_url(identifier, "!nd_prv_wlteh_webp_3"),
+    }
+    if live_photo is not None:
+        image["livePhoto"] = live_photo
+    if stream:
+        image[stream_field] = {
+            stream_key: [
+                {
+                    "masterUrl": live_photo_video_url(
+                        "sns-video-zl.xhscdn.com", identifier
+                    ),
+                    "backupUrls": [
+                        live_photo_video_url(
+                            "sns-bak-v8.xhscdn.com", identifier
+                        ),
+                        live_photo_video_url(
+                            "sns-bak-v10.xhscdn.com", identifier
+                        ),
+                    ],
+                    "videoCodec": stream_key,
+                    "width": 1080,
+                    "height": 1920,
+                    "videoBitrate": 2_300_000,
+                    "size": 800_000,
+                    "duration": 2800,
+                    "videoDuration": 2750,
+                    "qualityType": "HD",
+                }
+            ]
+        }
+    return image
+
+
 class PythonBackendTests(unittest.TestCase):
+    def test_video_url_port_and_malformed_image_token_safety(self) -> None:
+        self.assertFalse(
+            python_parse.is_xhs_video_url(
+                "https://sns-video-v28.xhscdn.com:8443/stream/live.mp4"
+            )
+        )
+        self.assertTrue(
+            python_parse.is_xhs_video_url(
+                "https://sns-video-v28.xhscdn.com:443/stream/live.mp4"
+            )
+        )
+        self.assertFalse(
+            python_video.is_xhs_video_url(
+                "https://sns-video-v28.xhscdn.com:8443/stream/live.mp4"
+            )
+        )
+        self.assertTrue(
+            python_video.is_xhs_video_url(
+                "https://sns-video-v28.xhscdn.com:443/stream/live.mp4"
+            )
+        )
+        self.assertIsNone(
+            python_parse.extract_original_asset_token(
+                "https://sns-webpic-qc.xhscdn.com/%E0%A4%A"
+            )
+        )
+        self.assertFalse(
+            python_parse.is_xhs_image_url("https://evilxhscdn.com/image.jpg")
+        )
+        self.assertFalse(
+            python_parse.is_direct_image_url(
+                "https://user:pass@sns-webpic-qc.xhscdn.com:8443/image.jpg"
+            )
+        )
+
     def test_extract_note_id(self) -> None:
         self.assertEqual(
             python_parse.extract_note_id(
@@ -172,6 +262,253 @@ class PythonBackendTests(unittest.TestCase):
             any(image["token"].startswith("other") for image in parsed["images"])
         )
 
+    def test_live_photos_stay_paired_and_exclude_recommendations(self) -> None:
+        target_id = "6a81c37e0000000025016000"
+        other_id = "bbbbbbbbbbbbbbbbbbbbbbbb"
+        state = {
+            "noteData": {
+                "data": {
+                    "noteData": {
+                        "noteId": target_id,
+                        "type": "normal",
+                        "title": "混合实况帖子",
+                        "imageList": [
+                            make_image_list("static", 1)[0],
+                            make_live_photo_image("live-flagged"),
+                            make_live_photo_image(
+                                "live-inferred",
+                                live_photo=None,
+                            ),
+                        ],
+                    },
+                    "relatedNotes": [
+                        {
+                            "noteId": other_id,
+                            "title": "推荐实况帖子",
+                            "imageList": [
+                                make_live_photo_image("recommend-live")
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+        page_html = (
+            "<script>window.__INITIAL_STATE__="
+            + json.dumps(state, ensure_ascii=False, separators=(",", ":"))
+            + "</script>"
+        )
+
+        parsed = python_parse.parse_note_html(page_html, target_id)
+
+        self.assertEqual(parsed["strategy"], "exact-initial-state")
+        self.assertEqual(
+            [image["token"] for image in parsed["images"]],
+            ["static01", "live-flagged", "live-inferred"],
+        )
+        self.assertEqual(
+            [bool(image["livePhoto"]) for image in parsed["images"]],
+            [False, True, True],
+        )
+        self.assertIsNone(parsed["images"][0]["liveVideo"])
+        self.assertEqual(
+            parsed["images"][1]["liveVideo"]["url"],
+            "https://sns-video-zl.xhscdn.com/stream/live-flagged.mp4",
+        )
+        self.assertEqual(
+            parsed["images"][1]["liveVideo"]["backupUrls"],
+            [
+                "https://sns-bak-v8.xhscdn.com/stream/live-flagged.mp4",
+                "https://sns-bak-v10.xhscdn.com/stream/live-flagged.mp4",
+            ],
+        )
+        self.assertEqual(parsed["images"][1]["liveVideo"]["duration"], 2750)
+        self.assertNotIn("recommend-live", json.dumps(parsed["images"]))
+        self.assertEqual(parsed["videos"], [])
+
+    def test_all_live_photo_codecs_and_stream_aliases(self) -> None:
+        target_id = "live-codecs-stream-aliases"
+        codecs_and_fields = (
+            ("h264", "stream"),
+            ("h265", "livePhotoStream"),
+            ("h266", "live_photo_stream"),
+            ("av1", "stream"),
+        )
+        image_list = [
+            make_live_photo_image(
+                f"live-{codec}",
+                live_photo=None,
+                stream_key=codec,
+                stream_field=stream_field,
+            )
+            for codec, stream_field in codecs_and_fields
+        ]
+        image_list[1]["stream"] = {}
+        h266_root = image_list[2]["live_photo_stream"]
+        h266_root["h266"] = h266_root["h266"][0]
+        state = {
+            "note": {
+                "noteDetailMap": {
+                    target_id: {
+                        "note": {
+                            "noteId": target_id,
+                            "imageList": image_list,
+                        }
+                    }
+                }
+            }
+        }
+        page_html = (
+            "<script>window.__INITIAL_STATE__="
+            + json.dumps(state, separators=(",", ":"))
+            + "</script>"
+        )
+
+        parsed = python_parse.parse_note_html(page_html, target_id)
+
+        self.assertEqual(
+            [image["liveVideo"]["codec"] for image in parsed["images"]],
+            ["h264", "h265", "h266", "av1"],
+        )
+        self.assertTrue(all(image["livePhoto"] for image in parsed["images"]))
+        self.assertEqual(parsed["videos"], [])
+
+    def test_live_photo_string_flags_are_parsed_strictly(self) -> None:
+        self.assertFalse(
+            python_parse.is_live_photo_item({"livePhoto": "false"})
+        )
+        self.assertFalse(
+            python_parse.is_live_photo_item({"live_photo": " 0 "})
+        )
+        self.assertTrue(
+            python_parse.is_live_photo_item({"isLivePhoto": " TRUE "})
+        )
+        self.assertTrue(
+            python_parse.is_live_photo_item({"is_live_photo": "1"})
+        )
+
+    def test_duplicate_static_image_keeps_each_live_stream(self) -> None:
+        target_id = "duplicate-static-live-001"
+        first = make_live_photo_image("shared-static-first-live")
+        second = make_live_photo_image("second-live")
+        second["urlDefault"] = first["urlDefault"]
+        second["urlPre"] = first["urlPre"]
+        state = {
+            "note": {
+                "noteDetailMap": {
+                    target_id: {
+                        "note": {
+                            "noteId": target_id,
+                            "title": "重复静态图实况帖子",
+                            "imageList": [first, second],
+                        }
+                    }
+                }
+            }
+        }
+        page_html = (
+            "<script>window.__INITIAL_STATE__="
+            + json.dumps(state, ensure_ascii=False, separators=(",", ":"))
+            + "</script>"
+        )
+
+        parsed = python_parse.parse_note_html(page_html, target_id)
+
+        self.assertEqual(
+            [image["token"] for image in parsed["images"]],
+            ["shared-static-first-live", "shared-static-first-live"],
+        )
+        self.assertEqual(
+            [image["liveVideo"]["url"] for image in parsed["images"]],
+            [
+                "https://sns-video-zl.xhscdn.com/stream/"
+                "shared-static-first-live.mp4",
+                "https://sns-video-zl.xhscdn.com/stream/second-live.mp4",
+            ],
+        )
+
+    def test_live_photo_flag_without_stream_keeps_only_the_flag(self) -> None:
+        target_id = "liveflagwithoutstream0001"
+        flagged = make_live_photo_image("flag-only", stream=False)
+        flagged["livePhoto"] = False
+        flagged["is_live_photo"] = True
+        state = {
+            "note": {
+                "noteDetailMap": {
+                    target_id: {
+                        "note": {
+                            "noteId": target_id,
+                            "title": "只有实况标记",
+                            "imageList": [flagged],
+                        }
+                    }
+                }
+            }
+        }
+        page_html = (
+            "<script>window.__INITIAL_STATE__="
+            + json.dumps(state, ensure_ascii=False, separators=(",", ":"))
+            + "</script>"
+        )
+
+        parsed = python_parse.parse_note_html(page_html, target_id)
+
+        self.assertEqual(len(parsed["images"]), 1)
+        self.assertTrue(parsed["images"][0]["livePhoto"])
+        self.assertIsNone(parsed["images"][0]["liveVideo"])
+        self.assertEqual(parsed["videos"], [])
+
+    def test_live_photo_api_output_includes_pair_metadata(self) -> None:
+        target_id = "api-live-photo-00000001"
+        state = {
+            "note": {
+                "noteDetailMap": {
+                    target_id: {
+                        "note": {
+                            "noteId": target_id,
+                            "title": "API 实况帖子",
+                            "imageList": [make_live_photo_image("api-live")],
+                        }
+                    }
+                }
+            }
+        }
+        page_html = (
+            "<script>window.__INITIAL_STATE__="
+            + json.dumps(state, ensure_ascii=False, separators=(",", ":"))
+            + "</script>"
+        )
+        source_url = (
+            "https://www.xiaohongshu.com/discovery/item/" + target_id
+        )
+        request_body = json.dumps({"text": source_url}).encode("utf-8")
+        sent: list[tuple[int, dict[str, object]]] = []
+        request_handler = python_parse.handler.__new__(python_parse.handler)
+        request_handler.headers = {"Content-Length": str(len(request_body))}
+        request_handler.rfile = io.BytesIO(request_body)
+        request_handler._send_json = (  # type: ignore[method-assign]
+            lambda status_code, payload: sent.append((status_code, payload))
+        )
+
+        with patch.object(
+            python_parse,
+            "fetch_note_page",
+            return_value=(source_url, page_html),
+        ):
+            request_handler.do_POST()
+
+        self.assertEqual(len(sent), 1)
+        status_code, payload = sent[0]
+        self.assertEqual(status_code, 200)
+        self.assertEqual(payload["livePhotoCount"], 1)
+        self.assertEqual(payload["videoCount"], 0)
+        self.assertEqual(payload["videos"], [])
+        image = payload["images"][0]
+        self.assertTrue(image["livePhoto"])
+        self.assertEqual(image["liveVideo"]["codec"], "h264")
+        self.assertEqual(image["liveVideo"]["duration"], 2750)
+        self.assertNotIn("source", image["liveVideo"])
+
     def test_undefined_in_initial_state(self) -> None:
         target_id = "6a68c6d3000000001303f099"
         image_list = json.dumps(make_image_list("undef", 3), separators=(",", ":"))
@@ -208,6 +545,106 @@ class PythonBackendTests(unittest.TestCase):
         self.assertTrue(
             all(image["token"].startswith("local") for image in parsed["images"])
         )
+
+    def test_local_fallback_is_object_bound_and_excludes_live_video_urls(self) -> None:
+        target_id = "6a68c6d3000000001303f099"
+        target_list = (
+            '[{"urlDefault":"'
+            + image_url("fallback-static")
+            + '"},BROKEN,{"masterUrl":"'
+            + live_photo_video_url(
+                "sns-video-zl.xhscdn.com", "fallback-live"
+            )
+            + '"}]'
+        )
+        recommended_list = json.dumps(
+            make_image_list("recommended", 1), separators=(",", ":")
+        )
+        recommended_video = json.dumps(
+            {
+                "media": {
+                    "stream": {
+                        "h264": [
+                            {
+                                "masterUrl": live_photo_video_url(
+                                    "sns-video-zl.xhscdn.com",
+                                    "recommended-video",
+                                )
+                            }
+                        ]
+                    }
+                }
+            },
+            separators=(",", ":"),
+        )
+        page_html = (
+            f'<script>{{"noteId":"{target_id}","padding":"'
+            + ("x" * 1200)
+            + f'",BROKEN,"imageList":{target_list}}}</script>'
+            + f'<script>{{"trackingCurrentId":"{target_id}",'
+            + f'"imageList":{recommended_list},"video":{recommended_video}}}</script>'
+        )
+
+        parsed = python_parse.parse_note_html(page_html, target_id)
+
+        self.assertEqual(parsed["strategy"], "note-id-local-image-list")
+        self.assertEqual(
+            [image["token"] for image in parsed["images"]],
+            ["fallback-static"],
+        )
+        self.assertIsNone(parsed["images"][0]["liveVideo"])
+        self.assertEqual(parsed["videos"], [])
+
+    def test_local_fallback_ignores_nested_recommended_media(self) -> None:
+        target_id = "6a68c6d3000000001303f099"
+        recommended_list = json.dumps(
+            make_image_list("nested-recommended", 1), separators=(",", ":")
+        )
+        recommended_video = json.dumps(
+            {
+                "media": {
+                    "stream": {
+                        "h264": [
+                            {
+                                "masterUrl": live_photo_video_url(
+                                    "sns-video-zl.xhscdn.com",
+                                    "nested-recommended-video",
+                                )
+                            }
+                        ]
+                    }
+                }
+            },
+            separators=(",", ":"),
+        )
+        target_list = json.dumps(
+            make_image_list("nested-target", 2), separators=(",", ":")
+        )
+        page_html = (
+            f'<script>{{"noteId":"{target_id}","related":'
+            f'[{{"imageList":{recommended_list},"video":{recommended_video}}}],'
+            '"padding":"'
+            + ("x" * 1200)
+            + f'",BROKEN,"imageList":{target_list}}}</script>'
+        )
+
+        parsed = python_parse.parse_note_html(page_html, target_id)
+
+        self.assertEqual(parsed["strategy"], "note-id-local-image-list")
+        self.assertEqual(len(parsed["images"]), 2)
+        self.assertTrue(
+            all(
+                image["token"].startswith("nested-target")
+                for image in parsed["images"]
+            )
+        )
+        self.assertTrue(
+            all(
+                "recommended" not in image["token"]
+                for image in parsed["images"]
+            )
+        )
+        self.assertEqual(parsed["videos"], [])
 
     def test_no_watermark_conversion(self) -> None:
         source = (

@@ -1,10 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import parseHandler from "../api/parse.js";
 import {
+  extractOriginalAssetToken,
   extractInputUrl,
   extractNoteId,
   fetchNotePage,
+  isDirectImageUrl,
+  isXhsImageUrl,
+  isXhsVideoUrl,
   parseNoteHtml
 } from "../lib/xhs.js";
 
@@ -27,6 +32,20 @@ test("extractNoteId 支持 discovery 和 explore URL", () => {
   assert.equal(
     extractNoteId("https://www.xiaohongshu.com/explore/1234567890abcdef12345678"),
     "1234567890abcdef12345678"
+  );
+});
+
+test("媒体 URL 拒绝畸形图片路径和非 HTTPS 默认端口", () => {
+  assert.equal(
+    extractOriginalAssetToken("https://sns-webpic-qc.xhscdn.com/%E0%A4%A"),
+    null
+  );
+  assert.equal(isXhsVideoUrl("https://sns-video-v28.xhscdn.com:8443/stream/live.mp4"), false);
+  assert.equal(isXhsVideoUrl("https://sns-video-v28.xhscdn.com:443/stream/live.mp4"), true);
+  assert.equal(isXhsImageUrl("https://evilxhscdn.com/image.jpg"), false);
+  assert.equal(
+    isDirectImageUrl("https://user:pass@sns-webpic-qc.xhscdn.com:8443/image.jpg"),
+    false
   );
 });
 
@@ -209,6 +228,54 @@ test("初始状态不可解析时，只取距离当前 noteId 最近的 imageLis
   assert.ok(parsed.images.every((image) => image.token.startsWith("local")));
 });
 
+test("局部降级只绑定目标 note 对象且不会把实况 MP4 当静态图", () => {
+  const targetId = "6a68c6d3000000001303f099";
+  const targetList = `[
+    {"urlDefault":"${imageUrl("fallback-static")}"},
+    BROKEN,
+    {"masterUrl":"${videoUrl("fallback-live")}"}
+  ]`;
+  const recommendedList = JSON.stringify(makeImageList("recommended", 1));
+  const recommendedVideo = JSON.stringify({
+    media: { stream: { h264: [makeVideo("h264", "recommended-video", 1080, 1920, 1, 1)] } }
+  });
+  const html = `
+    <script>{"noteId":"${targetId}","padding":"${"x".repeat(1200)}",BROKEN,"imageList":${targetList}}</script>
+    <script>{"trackingCurrentId":"${targetId}","imageList":${recommendedList},"video":${recommendedVideo}}</script>
+  `;
+
+  const parsed = parseNoteHtml(html, { noteId: targetId });
+
+  assert.equal(parsed.strategy, "note-id-local-image-list");
+  assert.deepEqual(parsed.images.map((image) => image.token), ["fallback-static"]);
+  assert.equal(parsed.images[0].liveVideo, null);
+  assert.equal(parsed.videos.length, 0);
+});
+
+test("局部降级忽略目标对象内部嵌套的推荐媒体", () => {
+  const targetId = "6a68c6d3000000001303f099";
+  const recommendedList = JSON.stringify(makeImageList("nested-recommended", 1));
+  const recommendedVideo = JSON.stringify({
+    media: { stream: { h264: [makeVideo("h264", "nested-recommended-video", 1080, 1920, 1, 1)] } }
+  });
+  const targetList = JSON.stringify(makeImageList("nested-target", 2));
+  const html = `<script>{
+    "noteId":"${targetId}",
+    "related":[{"imageList":${recommendedList},"video":${recommendedVideo}}],
+    "padding":"${"x".repeat(1200)}",
+    BROKEN,
+    "imageList":${targetList}
+  }</script>`;
+
+  const parsed = parseNoteHtml(html, { noteId: targetId });
+
+  assert.equal(parsed.strategy, "note-id-local-image-list");
+  assert.equal(parsed.images.length, 2);
+  assert.ok(parsed.images.every((image) => image.token.startsWith("nested-target")));
+  assert.ok(parsed.images.every((image) => !image.token.includes("recommended")));
+  assert.equal(parsed.videos.length, 0);
+});
+
 function videoUrl(id) {
   return `https://sns-video-bd.xhscdn.com/stream/${id}.mp4`;
 }
@@ -225,6 +292,217 @@ function makeVideo(codec, id, width, height, bitrate, size) {
     qualityType: "HD"
   };
 }
+
+test("实况图片按 imageList 保序配对，保留重复静态图且不混入普通视频", () => {
+  const targetId = "6a81c37e0000000025016000";
+  const otherId = "999999999999999999999999";
+  const sharedImage = imageUrl("live-shared");
+  const state = {
+    note: {
+      noteDetailMap: {
+        [targetId]: {
+          note: {
+            noteId: targetId,
+            title: "目标实况帖子",
+            imageList: [
+              {
+                urlDefault: sharedImage,
+                livePhoto: true,
+                stream: {
+                  h264: [makeVideo("h264", "live-first", 1080, 1440, 2600000, 700000)]
+                }
+              },
+              {
+                urlDefault: sharedImage,
+                live_photo: true,
+                stream: {
+                  h265: [makeVideo("h265", "live-second", 1080, 1440, 2400000, 650000)]
+                }
+              },
+              {
+                urlDefault: imageUrl("live-third"),
+                isLivePhoto: 1,
+                stream: {
+                  h266: [makeVideo("h266", "live-third", 1440, 1920, 3000000, 800000)]
+                }
+              },
+              {
+                urlDefault: imageUrl("live-fourth"),
+                stream: {},
+                livePhotoStream: {
+                  av1: [makeVideo("av1", "live-fourth", 1080, 1440, 2200000, 600000)]
+                }
+              },
+              {
+                urlDefault: imageUrl("plain-fifth"),
+                livePhoto: "false"
+              }
+            ],
+            video: {
+              media: {
+                stream: {
+                  h264: [makeVideo("h264", "ordinary-note-video", 1920, 1080, 5000000, 9000000)]
+                }
+              }
+            }
+          }
+        },
+        [otherId]: {
+          note: {
+            noteId: otherId,
+            imageList: [
+              {
+                urlDefault: imageUrl("recommended-live"),
+                livePhoto: true,
+                stream: {
+                  h264: [makeVideo("h264", "recommended-live", 1080, 1440, 2000000, 500000)]
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  };
+
+  const parsed = parseNoteHtml(
+    `<script>window.__INITIAL_STATE__=${JSON.stringify(state)}</script>`,
+    { noteId: targetId }
+  );
+
+  assert.equal(parsed.strategy, "exact-initial-state");
+  assert.deepEqual(
+    parsed.images.map((image) => image.token),
+    ["live-shared", "live-shared", "live-third", "live-fourth", "plain-fifth"]
+  );
+  assert.deepEqual(
+    parsed.images.slice(0, 4).map((image) => image.liveVideo.codec),
+    ["h264", "h265", "h266", "av1"]
+  );
+  assert.deepEqual(
+    parsed.images.slice(0, 4).map((image) => image.liveVideo.url),
+    ["live-first", "live-second", "live-third", "live-fourth"].map(videoUrl)
+  );
+  assert.ok(parsed.images.slice(0, 4).every((image) => image.livePhoto));
+  assert.equal(parsed.images[4].livePhoto, false);
+  assert.equal(parsed.images[4].liveVideo, null);
+  assert.equal(parsed.videos.length, 1);
+  assert.match(parsed.videos[0].url, /ordinary-note-video/);
+  assert.ok(parsed.videos.every((video) => !video.url.includes("live-first")));
+  assert.ok(parsed.images.every((image) => !image.token.includes("recommended")));
+});
+
+test("livePhoto 标记没有动态流时保留标记但不伪造 liveVideo", () => {
+  const targetId = "abababababababababababab";
+  const state = {
+    note: {
+      noteDetailMap: {
+        [targetId]: {
+          note: {
+            noteId: targetId,
+            imageList: [
+              {
+                urlDefault: imageUrl("marked-live-without-stream"),
+                livePhoto: " TRUE "
+              }
+            ]
+          }
+        }
+      }
+    }
+  };
+
+  const parsed = parseNoteHtml(
+    `<script>window.__INITIAL_STATE__=${JSON.stringify(state)}</script>`,
+    { noteId: targetId }
+  );
+
+  assert.equal(parsed.images.length, 1);
+  assert.equal(parsed.images[0].livePhoto, true);
+  assert.equal(parsed.images[0].liveVideo, null);
+  assert.equal(parsed.videos.length, 0);
+});
+
+test("Node parse API 在 images 项输出完整实况元数据", async () => {
+  const targetId = "cdcdcdcdcdcdcdcdcdcdcdcd";
+  const inputUrl = `https://www.xiaohongshu.com/discovery/item/${targetId}`;
+  const liveStream = {
+    ...makeVideo("h264", "api-live", 1080, 1440, 2300000, 612345),
+    videoDuration: 2800
+  };
+  const state = {
+    note: {
+      noteDetailMap: {
+        [targetId]: {
+          note: {
+            noteId: targetId,
+            title: "API 实况",
+            imageList: [
+              {
+                urlDefault: imageUrl("api-live-image"),
+                livePhoto: true,
+                stream: { h264: [liveStream] }
+              }
+            ]
+          }
+        }
+      }
+    }
+  };
+  const html = `<script>window.__INITIAL_STATE__=${JSON.stringify(state)}</script>`;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    assert.equal(String(input), inputUrl);
+    return new Response(html, {
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8" }
+    });
+  };
+
+  const response = {
+    statusCode: 200,
+    headers: {},
+    setHeader(name, value) {
+      this.headers[name] = value;
+    },
+    status(statusCode) {
+      this.statusCode = statusCode;
+      return this;
+    },
+    json(payload) {
+      this.payload = payload;
+      return payload;
+    }
+  };
+
+  try {
+    const payload = await parseHandler(
+      { method: "POST", body: { text: inputUrl } },
+      response
+    );
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(payload.success, true);
+    assert.equal(payload.count, 1);
+    assert.equal(payload.livePhotoCount, 1);
+    assert.equal(payload.videoCount, 0);
+    assert.equal(payload.videos.length, 0);
+    assert.equal(payload.images[0].livePhoto, true);
+    assert.deepEqual(payload.images[0].liveVideo, {
+      url: videoUrl("api-live"),
+      backupUrls: [videoUrl("api-live-backup")],
+      codec: "h264",
+      width: 1080,
+      height: 1440,
+      bitrate: 2300000,
+      size: 612345,
+      duration: 2800,
+      qualityType: "HD"
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 test("只解析当前 noteId 的视频流，不混入推荐帖子视频", () => {
   const targetId = "6a68c6d3000000001303f099";

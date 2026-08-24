@@ -52,8 +52,15 @@ export default async function handler(req, res) {
         content: "",
         type: "image",
         count: 1,
+        livePhotoCount: 0,
         videoCount: 0,
-        images: [{ index: 1, token, url: buildNoWatermarkUrl(token) }],
+        images: [{
+          index: 1,
+          token,
+          url: buildNoWatermarkUrl(token),
+          livePhoto: false,
+          liveVideo: null
+        }],
         videos: []
       });
     }
@@ -77,7 +84,23 @@ export default async function handler(req, res) {
     const images = parsed.images.map((image, index) => ({
       index: index + 1,
       token: image.token,
-      url: image.url
+      url: image.url,
+      livePhoto: Boolean(image.livePhoto),
+      liveVideo: image.liveVideo
+        ? {
+            url: image.liveVideo.url,
+            backupUrls: Array.isArray(image.liveVideo.backupUrls)
+              ? image.liveVideo.backupUrls
+              : [],
+            codec: image.liveVideo.codec,
+            width: image.liveVideo.width,
+            height: image.liveVideo.height,
+            bitrate: image.liveVideo.bitrate,
+            size: image.liveVideo.size,
+            duration: image.liveVideo.duration,
+            qualityType: image.liveVideo.qualityType
+          }
+        : null
     }));
     const videos = parsed.videos.map((video, index) => ({
       index: index + 1,
@@ -102,6 +125,7 @@ export default async function handler(req, res) {
       strategy: parsed.strategy,
       type: videos.length > 0 ? (images.length > 0 ? "mixed" : "video") : "image",
       count: images.length,
+      livePhotoCount: images.filter((image) => image.liveVideo).length,
       videoCount: videos.length,
       images,
       videos
