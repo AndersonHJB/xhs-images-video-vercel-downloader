@@ -34,6 +34,7 @@
           <nav class="app-navigation" aria-label="主要导航">
             <a class="nav-link" href="/">下载工具</a>
             <a class="nav-link is-current" href="/changelog.html" aria-current="page">更新记录</a>
+            <a class="nav-link" href="/#support">支持</a>
           </nav>
 
           <div class="header-status" aria-label="记录状态：Git 历史已核对">
@@ -68,13 +69,13 @@
           <aside class="release-summary" aria-label="项目版本概览">
             <div class="summary-heading">
               <span>REPOSITORY SNAPSHOT</span>
-              <strong>7a2c250</strong>
-              <small>origin/main · 2026.08.23 16:35</small>
+              <strong>807a2cc</strong>
+              <small>origin/main · 2026.08.25 14:28</small>
             </div>
 
             <div class="summary-grid">
               <div class="summary-stat">
-                <strong>10</strong>
+                <strong>13</strong>
                 <span>历史提交</span>
               </div>
               <div class="summary-stat">
@@ -86,12 +87,12 @@
                 <span>后台引擎</span>
               </div>
               <div class="summary-stat">
-                <strong>30+</strong>
+                <strong>46</strong>
                 <span>自动测试</span>
               </div>
             </div>
 
-            <p class="summary-note"><span aria-hidden="true">✦</span> 远端 main 已实时核对；测试数包含本次工作区的待发布变更，仓库目前没有 Git 标签。</p>
+            <p class="summary-note"><span aria-hidden="true">✦</span> 远端 main 已实时核对；46 项测试已在当前工作区重新运行，仓库目前没有 Git 标签。</p>
           </aside>
         </section>
 
@@ -101,6 +102,7 @@
             <h2 id="ledger-title">从现在，<br />回到最初。</h2>
 
             <nav class="release-index-nav" aria-label="更新记录快速定位">
+              <a href="#follow-tip-update"><span>FOLLOW</span><strong>关注 Tips</strong></a>
               <a href="#live-photo-update"><span>v1.4</span><strong>实况图片下载</strong></a>
               <a href="#clipboard-compat-update"><span>NOW</span><strong>剪贴板兼容</strong></a>
               <a href="#mobile-share-update"><span>LINK</span><strong>手机分享短链</strong></a>
@@ -120,7 +122,64 @@
           </aside>
 
           <div class="release-feed">
-            <article id="live-photo-update" class="release-entry release-entry-featured">
+            <article id="follow-tip-update" class="release-entry release-entry-featured">
+              <div class="release-entry-rail">
+                <span class="release-dot" aria-hidden="true"></span>
+                <time datetime="2026-08-25T14:28:35+08:00">
+                  <span>08.25</span>
+                  <small>2026 · 14:28</small>
+                </time>
+              </div>
+
+              <div class="release-card">
+                <header class="release-card-heading">
+                  <div>
+                    <div class="release-badges">
+                      <span class="release-badge release-badge-yellow">FOLLOW</span>
+                      <span class="release-status">体验优化 · 已提交</span>
+                    </div>
+                    <h3>哔哩哔哩与视频号，继续保持联系</h3>
+                  </div>
+                  <a
+                    class="commit-link"
+                    href="https://github.com/AndersonHJB/xhs-images-video-vercel-downloader/commit/807a2cc9c71f9cb256b47a14734e105c2fdb3a95"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="在 GitHub 查看提交 807a2cc"
+                  >807a2cc <span aria-hidden="true">↗</span></a>
+                </header>
+
+                <p class="release-lead">
+                  支持与联系区域新增关注 Tips：可直接前往哔哩哔哩 UID 405961705，也可扫描裁剪后的微信视频号二维码。
+                </p>
+
+                <div class="change-list">
+                  <div class="change-item">
+                    <span aria-hidden="true">01</span>
+                    <p><strong>直达哔哩哔哩主页</strong>新增 UID 405961705 的外链入口，让用户一键前往账号主页关注。</p>
+                  </div>
+                  <div class="change-item">
+                    <span aria-hidden="true">02</span>
+                    <p><strong>二维码精确裁剪</strong>从原图移除顶部账号资料与底部说明，仅保留 537 × 537 的视频号专有码及必要白色静区。</p>
+                  </div>
+                  <div class="change-item">
+                    <span aria-hidden="true">03</span>
+                    <p><strong>Esther 响应式设计</strong>以三栏关注提示组织说明、哔哩哔哩与视频号入口，并完成 1440px、390px 和 375px 布局适配。</p>
+                  </div>
+                  <div class="change-item">
+                    <span aria-hidden="true">04</span>
+                    <p><strong>保持下载功能不变</strong>本次仅更新首页结构、样式与二维码素材，app.js、API 和媒体下载流程均未改动。</p>
+                  </div>
+                </div>
+
+                <div class="release-card-footer">
+                  <span>SCOPE · FOLLOW / QR / RESPONSIVE</span>
+                  <span>业务脚本 / API · 0 改动</span>
+                </div>
+              </div>
+            </article>
+
+            <article id="live-photo-update" class="release-entry">
               <div class="release-entry-rail">
                 <span class="release-dot" aria-hidden="true"></span>
                 <time datetime="2026-08-24">
@@ -724,7 +783,7 @@
           <span class="footer-mark" aria-hidden="true">↓</span>
           <strong>每次改变，都讲清楚。</strong>
         </div>
-        <p>本页基于 origin/main 的 Git 提交记录整理，截至 7a2c250。</p>
+        <p>本页基于 origin/main 的 Git 提交记录整理，截至 807a2cc。</p>
         <div class="footer-credits">
           <a
             class="design-credit"
