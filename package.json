@@ -5,7 +5,7 @@
   "type": "module",
   "description": "支持 Node.js/Python 双后台切换的小红书无水印图片、实况与视频下载网站",
   "scripts": {
-    "dev": "vercel dev",
+    "dev:vercel": "vercel dev",
     "test": "npm run test:node && npm run test:python",
     "test:node": "node --test",
     "test:python": "python3 -m unittest discover -s test -p 'test_python_*.py'"

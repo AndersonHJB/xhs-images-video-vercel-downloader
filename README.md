@@ -98,10 +98,14 @@ Install Command：留空或默认
 需要安装 Node.js、Python 和 Vercel CLI：
 
 ```bash
-npx vercel dev
+npm run dev:vercel
 ```
 
 不能只用普通静态服务器运行，因为图片和视频下载都依赖 `/api` Functions。
+
+这里特意不使用 `dev` 作为脚本名：`vercel dev` 会自动读取并执行
+`package.json` 中的 `dev`，如果该脚本再次调用 `vercel dev`，就会形成递归。
+`dev:vercel` 只用于本地运行，不影响 Git push 后的 Vercel 自动部署，发布前无需修改或撤回。
 
 ## 自动测试
 
