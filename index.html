@@ -500,6 +500,16 @@
           <strong>媒体只经过你的浏览器。</strong>
         </div>
         <p>图片、实况 ZIP 与视频文件都在本地生成，不会上传到本站存储。</p>
+        <div class="site-visits" data-visit-counter role="group" aria-label="网站访问统计">
+          <div class="site-visits-summary">
+            <span class="site-visits-badge" aria-hidden="true">PV</span>
+            <span>累计访问</span>
+            <strong class="site-visits-total" data-visit-total aria-live="polite" aria-atomic="true">—</strong>
+            <span>次</span>
+          </div>
+          <p class="site-visits-note" data-visit-status>按当前域名汇总页面浏览次数</p>
+          <noscript><p class="site-visits-note">启用 JavaScript 后可查看统计。</p></noscript>
+        </div>
         <div class="footer-credits">
           <a
             class="design-credit"
@@ -523,5 +533,6 @@
     <!-- © ESTHER不二 esthersjw/esther-design-system · CC BY-NC-SA 4.0 -->
     <section class="design-system-signature" aria-hidden="true">esthersjw-design-system</section>
     <script type="module" src="/app.js"></script>
+    <script defer src="/visit-counter.js"></script>
   </body>
 </html>

@@ -61,6 +61,7 @@
 │   ├── xhs.test.js
 │   └── test_python_backend.py
 ├── app.js
+├── visit-counter.js       # 独立加载 BornForThis 访问统计 SDK
 ├── changelog.html
 ├── changelog.css
 ├── index.html
@@ -106,6 +107,19 @@ npm run dev:vercel
 这里特意不使用 `dev` 作为脚本名：`vercel dev` 会自动读取并执行
 `package.json` 中的 `dev`，如果该脚本再次调用 `vercel dev`，就会形成递归。
 `dev:vercel` 只用于本地运行，不影响 Git push 后的 Vercel 自动部署，发布前无需修改或撤回。
+
+## 网站访问统计
+
+首页和更新记录页的页脚已接入 [domain-visit-counter](https://github.com/AndersonHJB/domain-visit-counter)，使用已部署的 HTTPS 服务：`https://counter.bornforthis.cn`。
+
+- **展示口径**：当前域名的累计页面浏览次数（PV），不是独立访客人数或下载次数；接入前的访问不会自动补录。
+- **域名识别**：`visit-counter.js` 将当前 `location.hostname` 显式传给官方 SDK 的 `data-domain`。同一域名的首页和更新记录页共用总量，不设置 `data-project`；不同域名（包括 Vercel 预览域名）各自统计。
+- **上报方式**：每次打开页面，异步加载一次 `/counter.js`，由 SDK 自动上报一次 `/hit?d=当前域名` 并读取 `/stats?d=当前域名`；不额外调用 `hit()`，也不轮询。上报与读取并行，数值可能短暂滞后一次访问。
+- **数据显示**：通过 `bftcounter:update` 事件显示带千分位的真实 `total`；等待期间用 `—` 占位，脚本加载失败或 8 秒未获得有效结果时显示“访问统计暂时不可用”。失败不显示为 0，稍后返回的有效数据仍会更新。
+- **本地调试**：`file://`、localhost、本地 IP 以及 `.local` / `.test` 等本地域名不加载远程 SDK、不上报。正式站点只需正常部署这些静态文件，无需新增 Vercel 环境变量。
+- **独立运行**：统计代码与媒体解析、复制、ZIP 打包及下载逻辑分离；不把分享链接或笔记内容作为统计参数发送，也不请求 `includeIps`。
+
+如统计服务启用了域名白名单，需要在计数器服务的 `allowedRootDomains` 中允许实际部署域名。可用 `https://counter.bornforthis.cn/stats?d=实际域名` 只读核对数据；页面里的访问统计模块和请求状态也可用于排查。
 
 ## 自动测试
 
