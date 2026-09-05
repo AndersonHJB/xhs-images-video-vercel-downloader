@@ -149,6 +149,7 @@
 }
 
 .site-visits-toggle .site-visits-expand-icon,
+.site-visits-mobile-label,
 .site-visits[data-collapsed="true"] .site-visits-collapse-icon,
 .site-visits[data-collapsed="true"] .site-visits-emblem {
   display: none;
@@ -177,15 +178,28 @@ body:has(textarea:focus, select:focus, .toast-visible) .site-visits {
   transform: translateY(8px);
 }
 
-@media (max-width: 620px) {
+@media (max-width: 620px), (max-width: 960px) and (max-height: 500px), (hover: none) and (pointer: coarse) and (max-width: 960px) {
+  /* No expanded-card flash before the small-screen state is initialized. */
+  .site-visits:not([data-initialized]) {
+    visibility: hidden;
+  }
+
+  .site-visits[data-obstructing="true"] {
+    visibility: hidden;
+    opacity: 0;
+    transform: none;
+  }
+
   .site-visits {
-    left: max(12px, env(safe-area-inset-left, 0px));
+    left: auto;
+    right: max(12px, env(safe-area-inset-right, 0px));
     bottom: max(12px, env(safe-area-inset-bottom, 0px));
     width: 244px;
     max-width: calc(100vw - 24px);
     gap: 10px;
     padding: 12px 8px 12px 16px;
     border-radius: 25px;
+    pointer-events: auto;
   }
 
   .site-visits-emblem {
@@ -195,6 +209,55 @@ body:has(textarea:focus, select:focus, .toast-visible) .site-visits {
   .site-visits-toggle {
     flex-basis: 44px;
     width: 44px;
+  }
+
+  .site-visits-collapse-icon {
+    transform: rotate(180deg);
+  }
+
+  .site-visits[data-collapsed="true"] {
+    width: max-content;
+    min-width: 100px;
+    max-width: min(180px, calc(100vw - 24px));
+    padding: 0;
+    border-radius: 999px;
+    box-shadow: 0 3px 12px rgba(26, 26, 46, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  }
+
+  .site-visits[data-collapsed="true"] .site-visits-toggle {
+    display: flex;
+    flex: 1 1 auto;
+    justify-content: center;
+    gap: 7px;
+    width: auto;
+    min-width: 0;
+    height: 44px;
+    padding: 0 12px;
+    border-radius: inherit;
+  }
+
+  .site-visits[data-collapsed="true"] .site-visits-expand-icon {
+    flex: 0 0 15px;
+    width: 15px;
+    height: 15px;
+  }
+
+  .site-visits[data-collapsed="true"] .site-visits-mobile-label {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    color: var(--ink-light);
+    font-family: var(--font-sans);
+    font-size: 0.67rem;
+    white-space: nowrap;
+  }
+
+  .site-visits-mobile-total {
+    color: var(--visit-blue);
+    font-size: 0.82rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
   }
 }
 
