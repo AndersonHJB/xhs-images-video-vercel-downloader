@@ -4,6 +4,20 @@
   if (!container || container.dataset.initialized) return;
   container.dataset.initialized = 'true';
 
+  const toggle = container.querySelector('[data-visit-toggle]');
+  const content = container.querySelector('[data-visit-content]');
+  if (toggle && content) {
+    toggle.hidden = false;
+    toggle.addEventListener('click', () => {
+      const collapsed = container.dataset.collapsed !== 'true';
+      container.dataset.collapsed = String(collapsed);
+      content.hidden = collapsed;
+      toggle.setAttribute('aria-expanded', String(!collapsed));
+      toggle.setAttribute('aria-label', collapsed ? '展开访问统计' : '收起访问统计');
+      toggle.title = collapsed ? '展开访问统计' : '收起访问统计';
+    });
+  }
+
   const totalElement = container.querySelector('[data-visit-total]');
   const statusElement = container.querySelector('[data-visit-status]');
   const domain = location.hostname.toLowerCase();

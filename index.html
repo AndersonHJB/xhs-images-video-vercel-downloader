@@ -13,6 +13,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/visit-counter.css" />
     <link rel="stylesheet" href="/support.css" />
     <title>小红书图片、实况与视频下载</title>
   </head>
@@ -500,16 +501,6 @@
           <strong>媒体只经过你的浏览器。</strong>
         </div>
         <p>图片、实况 ZIP 与视频文件都在本地生成，不会上传到本站存储。</p>
-        <div class="site-visits" data-visit-counter role="group" aria-label="网站访问统计">
-          <div class="site-visits-summary">
-            <span class="site-visits-badge" aria-hidden="true">PV</span>
-            <span>累计访问</span>
-            <strong class="site-visits-total" data-visit-total aria-live="polite" aria-atomic="true">—</strong>
-            <span>次</span>
-          </div>
-          <p class="site-visits-note" data-visit-status>按当前域名汇总页面浏览次数</p>
-          <noscript><p class="site-visits-note">启用 JavaScript 后可查看统计。</p></noscript>
-        </div>
         <div class="footer-credits">
           <a
             class="design-credit"
@@ -529,6 +520,28 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
     <div id="alert-toast" class="toast" role="alert" aria-live="assertive" aria-atomic="true"></div>
+
+    <div class="site-visits" data-visit-counter role="group" aria-label="网站访问统计">
+      <span class="site-visits-emblem" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M3 12s3-6 9-6 9 6 9 6-3 6-9 6-9-6-9-6Z" /><circle cx="12" cy="12" r="2.5" /></svg>
+      </span>
+      <div id="site-visit-content" class="site-visits-content" data-visit-content>
+        <div class="site-visits-heading">
+          <span>累计访问</span>
+          <span class="site-visits-badge">PV</span>
+        </div>
+        <p class="site-visits-summary">
+          <strong class="site-visits-total" data-visit-total aria-live="polite" aria-atomic="true">—</strong>
+          <span>次</span>
+        </p>
+        <p class="site-visits-note" data-visit-status>按当前域名汇总页面浏览次数</p>
+        <noscript><p class="site-visits-note">启用 JavaScript 后可查看统计。</p></noscript>
+      </div>
+      <button class="site-visits-toggle" type="button" data-visit-toggle aria-expanded="true" aria-controls="site-visit-content" aria-label="收起访问统计" title="收起访问统计" hidden>
+        <svg class="site-visits-collapse-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m14 7-5 5 5 5" /></svg>
+        <svg class="site-visits-expand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 16v-3m7 3V8m7 8V5M4 20h16" /></svg>
+      </button>
+    </div>
 
     <!-- © ESTHER不二 esthersjw/esther-design-system · CC BY-NC-SA 4.0 -->
     <section class="design-system-signature" aria-hidden="true">esthersjw-design-system</section>

@@ -62,6 +62,7 @@
 │   └── test_python_backend.py
 ├── app.js
 ├── visit-counter.js       # 独立加载 BornForThis 访问统计 SDK
+├── visit-counter.css      # 访问统计专用液态玻璃浮层样式
 ├── changelog.html
 ├── changelog.css
 ├── index.html
@@ -110,7 +111,9 @@ npm run dev:vercel
 
 ## 网站访问统计
 
-首页和更新记录页的页脚已接入 [domain-visit-counter](https://github.com/AndersonHJB/domain-visit-counter)，使用已部署的 HTTPS 服务：`https://counter.bornforthis.cn`。
+首页和更新记录页已接入 [domain-visit-counter](https://github.com/AndersonHJB/domain-visit-counter)，使用已部署的 HTTPS 服务：`https://counter.bornforthis.cn`。
+
+统计以左下角液态玻璃浮层展示，沿用页面暖白、蓝黄配色。专用 `visit-counter.css` 只影响统计模块；支持收起 / 展开、手机安全区、减少透明度和减少动态效果偏好，不支持背景模糊时使用暖白底色。展示区域允许点击穿透，仅收起 / 展开按钮接收点击；输入框或选择框聚焦、现有提示条显示时，统计浮层暂时隐藏。
 
 - **展示口径**：当前域名的累计页面浏览次数（PV），不是独立访客人数或下载次数；接入前的访问不会自动补录。
 - **域名识别**：`visit-counter.js` 将当前 `location.hostname` 显式传给官方 SDK 的 `data-domain`。同一域名的首页和更新记录页共用总量，不设置 `data-project`；不同域名（包括 Vercel 预览域名）各自统计。

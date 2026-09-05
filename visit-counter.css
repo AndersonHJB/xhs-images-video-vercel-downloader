@@ -1,0 +1,234 @@
+/* A self-contained, warm Liquid Glass surface for the visit counter only. */
+.site-visits {
+  --visit-blue: #174a83;
+  position: fixed;
+  z-index: 90;
+  left: max(24px, env(safe-area-inset-left, 0px));
+  bottom: max(24px, env(safe-area-inset-bottom, 0px));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 288px;
+  max-width: calc(100vw - 48px);
+  padding: 14px 10px 14px 16px;
+  isolation: isolate;
+  border: 1px solid rgba(255, 253, 248, 0.88);
+  border-radius: 28px;
+  color: var(--ink);
+  background: rgba(254, 252, 246, 0.96);
+  box-shadow:
+    0 10px 32px rgba(26, 26, 46, 0.12),
+    0 2px 6px rgba(30, 91, 168, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -1px 0 rgba(244, 215, 88, 0.24);
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .site-visits {
+    background: linear-gradient(135deg, rgba(255, 253, 248, 0.88), rgba(254, 252, 246, 0.78) 52%, rgba(250, 246, 235, 0.84));
+    -webkit-backdrop-filter: blur(22px) saturate(160%);
+    backdrop-filter: blur(22px) saturate(160%);
+  }
+}
+
+.site-visits::before {
+  position: absolute;
+  z-index: -1;
+  inset: 1px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: inherit;
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.52), transparent 38%, transparent 70%, rgba(244, 215, 88, 0.1));
+  content: "";
+  pointer-events: none;
+}
+
+.site-visits-emblem {
+  display: grid;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(255, 253, 248, 0.85);
+  border-radius: 50%;
+  color: var(--visit-blue);
+  background: rgba(244, 215, 88, 0.26);
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.9);
+}
+
+.site-visits-emblem svg,
+.site-visits-toggle svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.site-visits-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.site-visits-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-light);
+  font-size: 0.69rem;
+  line-height: 1.4;
+}
+
+.site-visits-badge {
+  color: var(--visit-blue);
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.site-visits-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin: 3px 0;
+  font-size: 0.67rem;
+  line-height: 1.2;
+}
+
+.site-visits-total {
+  min-width: 0;
+  color: var(--visit-blue);
+  font-family: var(--font-display);
+  font-size: clamp(1.25rem, 2vw, 1.55rem);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
+}
+
+.site-visits-note {
+  margin: 0;
+  color: var(--ink-light);
+  font-size: 0.61rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.site-visits-toggle {
+  display: grid;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 44px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 18px;
+  color: var(--visit-blue);
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 160ms ease;
+}
+
+.site-visits-toggle:hover {
+  border-color: rgba(255, 253, 248, 0.9);
+  background: rgba(244, 215, 88, 0.22);
+}
+
+.site-visits-toggle:focus-visible {
+  outline: 2px solid var(--visit-blue);
+  outline-offset: 2px;
+}
+
+.site-visits-toggle:active {
+  background: rgba(43, 127, 216, 0.12);
+}
+
+.site-visits-toggle .site-visits-expand-icon,
+.site-visits[data-collapsed="true"] .site-visits-collapse-icon,
+.site-visits[data-collapsed="true"] .site-visits-emblem {
+  display: none;
+}
+
+.site-visits[data-collapsed="true"] {
+  width: 52px;
+  padding: 3px;
+  border-radius: 50%;
+}
+
+.site-visits[data-collapsed="true"] .site-visits-toggle {
+  flex-basis: 44px;
+  width: 44px;
+  border-radius: 50%;
+}
+
+.site-visits[data-collapsed="true"] .site-visits-expand-icon {
+  display: block;
+}
+
+/* Yield only this surface while the user types or an existing toast is visible. */
+body:has(textarea:focus, select:focus, .toast-visible) .site-visits {
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+@media (max-width: 620px) {
+  .site-visits {
+    left: max(12px, env(safe-area-inset-left, 0px));
+    bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    width: 244px;
+    max-width: calc(100vw - 24px);
+    gap: 10px;
+    padding: 12px 8px 12px 16px;
+    border-radius: 25px;
+  }
+
+  .site-visits-emblem {
+    display: none;
+  }
+
+  .site-visits-toggle {
+    flex-basis: 44px;
+    width: 44px;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .site-visits {
+    border-color: var(--line-strong);
+    background: var(--cream);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .site-visits::before {
+    display: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .site-visits {
+    border-color: CanvasText;
+    color: CanvasText;
+    background: Canvas;
+    box-shadow: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-visits,
+  .site-visits-toggle {
+    transition: none;
+  }
+}
+
+@media print {
+  .site-visits {
+    display: none;
+  }
+}

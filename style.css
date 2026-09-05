@@ -1391,48 +1391,6 @@ footer > p {
   gap: 2px;
 }
 
-.site-visits {
-  grid-column: 1 / -1;
-  display: grid;
-  justify-items: start;
-  gap: 5px;
-  padding-top: 16px;
-  border-top: 1px dashed var(--line-strong);
-}
-
-.site-visits-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px 10px;
-  font-size: 0.78rem;
-}
-
-.site-visits-badge {
-  align-self: center;
-  padding: 1px 7px;
-  border-radius: 4px;
-  color: var(--ink);
-  background: var(--yellow);
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.site-visits-total {
-  color: var(--blue-deep);
-  font-family: var(--font-display);
-  font-size: clamp(1.25rem, 2vw, 1.6rem);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.2;
-  overflow-wrap: anywhere;
-}
-
-.site-visits-note {
-  color: var(--ink-faint);
-  font-size: 0.72rem;
-}
-
 .design-credit,
 .design-license-credit {
   display: inline-flex;
